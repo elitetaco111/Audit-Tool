@@ -6,8 +6,6 @@ from PIL import Image
 from io import BytesIO
 import concurrent.futures
 
-
-
 def ensure_folder(folder_name):
     os.makedirs(folder_name, exist_ok=True)
 
