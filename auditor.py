@@ -59,6 +59,17 @@ class AuditApp:
         # Set default font for canvas text
         self.canvas_font = ("Roboto", 24)
 
+        # Add back button (hidden until images are shown)
+        back_img_path = os.path.join(os.path.dirname(__file__), "back.png")
+        if os.path.exists(back_img_path):
+            back_img = Image.open(back_img_path)
+            back_img = back_img.resize((100, 100))
+            self.tk_back_img = ImageTk.PhotoImage(back_img)
+            self.btn_back = tk.Button(self.frame, image=self.tk_back_img, command=self.undo_last, borderwidth=0)
+        else:
+            self.btn_back = tk.Button(self.frame, text="Back", command=self.undo_last)
+        self.btn_back.place_forget()  # Hide initially
+
     def load_csv(self):
         file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
         if not file_path:
@@ -101,7 +112,7 @@ class AuditApp:
             not team_league or
             "-tbd" in logo_id.lower()
         ):
-            self.choices.append(('to_audit', row))
+            self.choices.append(('to_audit', row, True))  # Mark as auto-rejected
             self.index += 1
             self.show_image()
             return
@@ -125,6 +136,9 @@ class AuditApp:
             self.canvas.create_image(img_x, img_y, anchor='nw', image=self.tk_img)
         else:
             self.canvas.create_text(img_x + 100, img_y + 100, text="Image not found", anchor='nw', font=self.canvas_font)
+
+        # Place the back button under the product image
+        self.btn_back.place(x=img_x + 205, y=img_y + 750)  # Centered under image
 
         # Info boxes, at least 50px to the right of the product image
         x_offset = 511 + 50
@@ -155,25 +169,38 @@ class AuditApp:
         self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Team League Data: {team_league}", font=self.canvas_font)
 
     def mark_right(self, event=None):
-        self.choices.append(('accepted', self.data.iloc[self.index]))
+        self.choices.append(('accepted', self.data.iloc[self.index], False))
         self.index += 1
         self.show_image()
 
     def mark_wrong(self, event=None):
-        self.choices.append(('to_audit', self.data.iloc[self.index]))
+        self.choices.append(('to_audit', self.data.iloc[self.index], False))
         self.index += 1
         self.show_image()
 
+    def undo_last(self):
+        # Undo the last user action (not auto-rejected)
+        for i in range(len(self.choices) - 1, -1, -1):
+            status, row, auto_rejected = self.choices[i]
+            if not auto_rejected:
+                self.choices.pop(i)
+                self.index = row.name  # row.name is the original index in DataFrame
+                self.show_image()
+                return
+        # If nothing to undo, do nothing
+
     def finish(self):
         self.save_outputs()
-        messagebox.showinfo("Done", "Audit complete!\nFiles saved as accepted.csv and to_audit.csv.")
+        messagebox.showinfo("Done", "Audit complete!\nFile saved as to_audit.csv.")
         self.root.quit()
 
     def save_outputs(self):
         if not self.choices:
             return
-        accepted = [row for status, row in self.choices if status == 'accepted']
-        to_audit = [row for status, row in self.choices if status == 'to_audit']
+        accepted = [row for status, row, auto_rejected in self.choices if status == 'accepted']
+        to_audit = [row for status, row, auto_rejected in self.choices if status == 'to_audit']
+        if accepted:
+            pd.DataFrame(accepted).to_csv("accepted.csv", index=False)
         if to_audit:
             pd.DataFrame(to_audit).to_csv("to_audit.csv", index=False)
         # Delete TEMP folder contents
