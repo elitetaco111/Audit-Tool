@@ -56,6 +56,8 @@ class AuditApp:
         # Make canvas large enough for fullscreen and info
         self.canvas = tk.Canvas(self.frame, width=1920, height=1080, bg="white")
         self.canvas.pack(fill=tk.BOTH, expand=True)
+        # Set default font for canvas text
+        self.canvas_font = ("Roboto", 24)
 
     def load_csv(self):
         file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
@@ -66,6 +68,18 @@ class AuditApp:
         self.data.reset_index(drop=True, inplace=True)
         self.index = 0
         self.choices = []
+        self.btn_load.pack_forget()  # Hide the choose file button after loading
+
+        # Set background to background.png if it exists
+        bg_path = os.path.join(os.path.dirname(__file__), "background.png")
+        if os.path.exists(bg_path):
+            bg_img = Image.open(bg_path)
+            bg_img = bg_img.resize((1920, 1080))  # Resize as needed for your canvas
+            self.tk_bg_img = ImageTk.PhotoImage(bg_img)
+            # Draw background image as the first (bottom) item on the canvas
+            self.bg_image_id = self.canvas.create_image(0, 0, anchor='nw', image=self.tk_bg_img)
+            self.canvas.tag_lower(self.bg_image_id)  # Ensure it's at the very back
+
         self.show_image()
 
     def show_image(self):
@@ -73,14 +87,35 @@ class AuditApp:
             self.finish()
             return
         row = self.data.iloc[self.index]
-        img_path = os.path.join(TEMP_FOLDER, f"{row['Name']}.jpg")
-        # Find logo and color images, checking for .jpg and .png, case-insensitive
+        # Check for missing/invalid fields
         logo_id = row['Logo ID'] if pd.notna(row['Logo ID']) else ""
+        class_mapping = row['Class Mapping'] if pd.notna(row['Class Mapping']) else ""
         color_id = row['Parent Color Primary'] if pd.notna(row['Parent Color Primary']) else ""
+        team_league = row['Team League Data'] if pd.notna(row['Team League Data']) else ""
+
+        # Reject if any required field is blank or Logo ID contains "-TBD"
+        if (
+            not logo_id or
+            not class_mapping or
+            not color_id or
+            not team_league or
+            "-tbd" in logo_id.lower()
+        ):
+            self.choices.append(('to_audit', row))
+            self.index += 1
+            self.show_image()
+            return
+
+        img_path = os.path.join(TEMP_FOLDER, f"{row['Name']}.jpg")
         logo_path = find_image(LOGOS_FOLDER, logo_id)
         color_path = find_image(COLORS_FOLDER, color_id)
 
-        self.canvas.delete("all")
+        # Remove all items except the background image
+        items = self.canvas.find_all()
+        for item in items:
+            if not hasattr(self, 'bg_image_id') or item != self.bg_image_id:
+                self.canvas.delete(item)
+
         # Main product image at natural resolution (511x730)
         img_x, img_y = 0, 0
         if os.path.exists(img_path):
@@ -89,35 +124,35 @@ class AuditApp:
             self.tk_img = ImageTk.PhotoImage(img)
             self.canvas.create_image(img_x, img_y, anchor='nw', image=self.tk_img)
         else:
-            self.canvas.create_text(img_x + 100, img_y + 100, text="Image not found", anchor='nw')
+            self.canvas.create_text(img_x + 100, img_y + 100, text="Image not found", anchor='nw', font=self.canvas_font)
 
         # Info boxes, at least 50px to the right of the product image
         x_offset = 511 + 50
         y_offset = 10
-        box_height = 60
+        box_height = 90
 
         # Logo ID
-        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Logo ID: {logo_id}")
+        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Logo ID: {logo_id}", font=self.canvas_font)
         if logo_path and os.path.exists(logo_path):
             logo_img = Image.open(logo_path).resize((200, 200))
             self.tk_logo = ImageTk.PhotoImage(logo_img)
-            self.canvas.create_image(x_offset+100, y_offset+20, anchor='nw', image=self.tk_logo)
+            self.canvas.create_image(x_offset+100, y_offset+40, anchor='nw', image=self.tk_logo)
         y_offset += box_height + 180
 
         # Class Mapping
-        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Class Mapping: {row['Class Mapping']}")
+        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Class Mapping: {class_mapping}", font=self.canvas_font)
         y_offset += box_height
 
         # Parent Color Primary
-        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Parent Color Primary: {color_id}")
+        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Parent Color Primary: {color_id}", font=self.canvas_font)
         if color_path and os.path.exists(color_path):
             color_img = Image.open(color_path).resize((200, 200))
             self.tk_color = ImageTk.PhotoImage(color_img)
-            self.canvas.create_image(x_offset+100, y_offset+20, anchor='nw', image=self.tk_color)
+            self.canvas.create_image(x_offset+100, y_offset+40, anchor='nw', image=self.tk_color)
         y_offset += box_height + 180
 
         # Team League Data
-        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Team League Data: {row['Team League Data']}")
+        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Team League Data: {team_league}", font=self.canvas_font)
 
     def mark_right(self, event=None):
         self.choices.append(('accepted', self.data.iloc[self.index]))
@@ -139,8 +174,6 @@ class AuditApp:
             return
         accepted = [row for status, row in self.choices if status == 'accepted']
         to_audit = [row for status, row in self.choices if status == 'to_audit']
-        if accepted:
-            pd.DataFrame(accepted).to_csv("accepted.csv", index=False)
         if to_audit:
             pd.DataFrame(to_audit).to_csv("to_audit.csv", index=False)
         # Delete TEMP folder contents
