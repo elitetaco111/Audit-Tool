@@ -26,9 +26,8 @@ def find_image(folder, base_name):
 class AuditApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Product Audit Tool")
-        # Set windowed fullscreen (maximized, but with window borders and controls)
-        self.root.state('zoomed')  # This works on Windows for windowed fullscreen
+        self.root.title("Product Audit Tool --- Press Left arrow to mark wrong, Right arrow to mark right")
+        self.root.state('zoomed')
         self.data = None
         self.index = 0
         self.choices = []
@@ -199,10 +198,15 @@ class AuditApp:
             return
         accepted = [row for status, row, auto_rejected in self.choices if status == 'accepted']
         to_audit = [row for status, row, auto_rejected in self.choices if status == 'to_audit']
-        if accepted:
-            pd.DataFrame(accepted).to_csv("accepted.csv", index=False)
+
+        # Columns to exclude
+        exclude_cols = {"Picture ID", "Image Assignment"}
+
         if to_audit:
-            pd.DataFrame(to_audit).to_csv("to_audit.csv", index=False)
+            to_audit_df = pd.DataFrame(to_audit)
+            to_audit_df = to_audit_df[[col for col in to_audit_df.columns if col not in exclude_cols]]
+            to_audit_df.to_csv("to_audit.csv", index=False)
+
         # Delete TEMP folder contents
         if os.path.exists(TEMP_FOLDER):
             for filename in os.listdir(TEMP_FOLDER):
