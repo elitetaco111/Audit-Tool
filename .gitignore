@@ -9,3 +9,10 @@
 *.pyc
 *.png
 *.jpg
+*.toc
+*.txt
+*.spec
+*.html
+*.pkg
+*.exe
+*.pyz

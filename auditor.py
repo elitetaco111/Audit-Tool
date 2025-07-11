@@ -1,4 +1,5 @@
 import os
+import sys
 import shutil
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -10,6 +11,16 @@ TEMP_FOLDER = "TEMP"
 LOGOS_FOLDER = "Logos"
 COLORS_FOLDER = "Colors"
 
+def resource_path(relative_path):
+    """
+    Get absolute path to resource, works for dev and for PyInstaller.
+    """
+    try:
+        base_path = sys._MEIPASS
+    except AttributeError:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
 def find_image(folder, base_name):
     """
     Looks for an image file (.jpg or .png, case-insensitive) in the given folder matching base_name.
@@ -18,9 +29,9 @@ def find_image(folder, base_name):
     if not base_name or not isinstance(base_name, str):
         return None
     for ext in ['.jpg', '.png']:
-        for file in os.listdir(folder):
+        for file in os.listdir(resource_path(folder)):
             if file.lower() == f"{base_name.lower()}{ext}":
-                return os.path.join(folder, file)
+                return os.path.join(resource_path(folder), file)
     return None
 
 class AuditApp:
@@ -43,7 +54,7 @@ class AuditApp:
         self.frame = tk.Frame(self.root)
         self.frame.pack(fill=tk.BOTH, expand=True)
         # Replace button with image button
-        choose_img_path = os.path.join(os.path.dirname(__file__), "choose.png")
+        choose_img_path = resource_path("choose.png")
         if os.path.exists(choose_img_path):
             choose_img = Image.open(choose_img_path)
             choose_img = choose_img.resize((200, 200))  # Resize as needed
@@ -59,7 +70,7 @@ class AuditApp:
         self.canvas_font = ("Roboto", 24)
 
         # Add back button (hidden until images are shown)
-        back_img_path = os.path.join(os.path.dirname(__file__), "back.png")
+        back_img_path = resource_path("back.png")
         if os.path.exists(back_img_path):
             back_img = Image.open(back_img_path)
             back_img = back_img.resize((100, 100))
@@ -81,7 +92,7 @@ class AuditApp:
         self.btn_load.pack_forget()  # Hide the choose file button after loading
 
         # Set background to background.png if it exists
-        bg_path = os.path.join(os.path.dirname(__file__), "background.png")
+        bg_path = resource_path("background.png")
         if os.path.exists(bg_path):
             bg_img = Image.open(bg_path)
             bg_img = bg_img.resize((1920, 1080))  # Resize as needed for your canvas
