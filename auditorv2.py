@@ -6,6 +6,7 @@ from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
 import pandas as pd
 import download_helper
+import csv
 
 TEMP_FOLDER = "TEMP"
 LOGOS_FOLDER = "Logos"
@@ -193,19 +194,20 @@ class AuditApp:
         self._popup_open = True
 
         row = self.data.iloc[self.index]
-        wrong_fields = self.ask_wrong_fields(row)
-        self._popup_open = False  # Allow input again after popup closes
+        wrong_info = self.ask_wrong_fields(row)
+        self._popup_open = False
 
-        # If user closes the popup or submits nothing, do not proceed
+        wrong_fields = wrong_info["fields"] if isinstance(wrong_info, dict) else []
+        wrong_details = wrong_info["details"] if isinstance(wrong_info, dict) else {}
+
         if not wrong_fields or (isinstance(wrong_fields, list) and all(f.strip() == "" for f in wrong_fields)):
             messagebox.showwarning("Input required", "You must select at least one field that is wrong before continuing.")
-            return  # Do not advance
-        self.choices.append(('to_audit', row, False, wrong_fields))
+            return
+        self.choices.append(('to_audit', row, False, wrong_fields, wrong_details))
         self.index += 1
         self.show_image()
 
     def ask_wrong_fields(self, row):
-        # List of fields to choose from
         fields = [
             "Logo ID",
             "Class Mapping",
@@ -215,11 +217,11 @@ class AuditApp:
         ]
         popup = tk.Toplevel(self.root)
         popup.title("Select the field(s) that are wrong")
-        popup.grab_set()  # Make modal
+        popup.grab_set()
         popup.transient(self.root)
         self.root.unbind('<Left>')
         self.root.unbind('<Right>')
-        self.root.attributes('-disabled', True)  # Freeze main window
+        self.root.attributes('-disabled', True)
 
         tk.Label(popup, text="Which field(s) are wrong?").pack(padx=20, pady=10)
 
@@ -236,7 +238,7 @@ class AuditApp:
                 entry.pack_forget()
         vars["Other"].trace_add("write", on_other_checked)
 
-        result = {"value": None}
+        result = {"value": None, "details": {}}
         def submit():
             selected = [field for field in fields if vars[field].get() and field != "Other"]
             if vars["Other"].get():
@@ -248,21 +250,133 @@ class AuditApp:
             if not selected:
                 messagebox.showwarning("Input required", "Please select at least one field or enter a value for 'Other'.", parent=popup)
                 return
-            result["value"] = selected
             popup.destroy()
+            result["value"] = selected
 
         popup.protocol("WM_DELETE_WINDOW", lambda: popup.destroy())
         tk.Button(popup, text="OK", command=submit).pack(pady=10)
         popup.wait_window()
-        self.root.attributes('-disabled', False)  # Unfreeze main window
-
-        # Re-bind keys after popup closes
+        self.root.attributes('-disabled', False)
         self.root.bind('<Left>', self.mark_wrong)
         self.root.bind('<Right>', self.mark_right)
+        self.root.focus_force()
 
-        self.root.focus_force()  # Bring main window to front and focus
+        # Now, for each selected field, prompt for the new value as needed
+        wrong_fields = result["value"]
+        wrong_details = {}
 
-        return result["value"]
+        # Helper to select from a list
+        def select_from_list(title, label, options, show_images=False, image_folder=None):
+            sel_popup = tk.Toplevel(self.root)
+            sel_popup.title(title)
+            sel_popup.grab_set()
+            self.root.attributes('-disabled', True)
+            tk.Label(sel_popup, text=label).pack(padx=50, pady=10)
+
+            # Make the listbox wider
+            listbox_width = 60  # Increase as needed
+
+            var = tk.StringVar(value=options[0] if options else "")
+            listbox = tk.Listbox(
+                sel_popup,
+                listvariable=tk.StringVar(value=options),
+                width=listbox_width,
+                height=min(15, len(options)),
+                exportselection=False
+            )
+            listbox.pack(side=tk.LEFT, padx=(50, 10), pady=10, fill=tk.Y)
+
+            # For showing images next to Logo ID options
+            image_label = None
+            img_cache = {}
+
+            if show_images and image_folder:
+                image_label = tk.Label(sel_popup)
+                image_label.pack(side=tk.LEFT, padx=(10, 50), pady=10, fill=tk.BOTH, expand=True)
+
+                def show_logo_img(event):
+                    sel = listbox.curselection()
+                    if sel:
+                        logo_id = options[sel[0]]
+                        img_path = find_image(image_folder, logo_id)
+                        if img_path and os.path.exists(img_path):
+                            img = Image.open(img_path)
+                            img = img.resize((150, 150))  # Adjust size as needed
+                            tk_img = ImageTk.PhotoImage(img)
+                            img_cache["img"] = tk_img  # Prevent garbage collection
+                            image_label.config(image=tk_img, text="")
+                        else:
+                            image_label.config(image="", text="No image found")
+                    else:
+                        image_label.config(image="", text="")
+                listbox.bind("<<ListboxSelect>>", show_logo_img)
+                # Show image for first item by default
+                if options:
+                    listbox.selection_set(0)
+                    show_logo_img(None)
+
+            result = {"value": None}
+            def on_select():
+                sel = listbox.curselection()
+                if sel:
+                    result["value"] = options[sel[0]]
+                    sel_popup.destroy()
+            tk.Button(sel_popup, text="OK", command=on_select).pack(pady=10)
+            sel_popup.wait_window()
+            self.root.attributes('-disabled', False)
+            self.root.focus_force()
+            return result["value"]
+
+        # Load CSVs as needed
+        def load_csv_column(filename, colname, filter_col=None, filter_val=None):
+            path = resource_path(filename)
+            values = []
+            if not os.path.exists(path):
+                return values
+            with open(path, newline='', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    if filter_col and filter_val and row.get(filter_col) != filter_val:
+                        continue
+                    values.append(row[colname])
+            return sorted(set(values))
+
+        # Always handle Team League Data first if selected
+        if "Team League Data" in wrong_fields:
+            team_options = load_csv_column("TeamList.csv", "Team League Data")
+            new_team = select_from_list("Select Team", "Select the correct Team League Data:", team_options)
+            if new_team:
+                wrong_details["Team League Data"] = new_team
+                # Update row for filtering other fields
+                row = row.copy()
+                row['Team League Data'] = new_team
+
+        # Now handle other fields, filtering by team if needed
+        team_val = row['Team League Data'] if pd.notna(row['Team League Data']) else ""
+        if "Logo ID" in wrong_fields:
+            logo_options = load_csv_column("LogoList.csv", "Logo ID", filter_col="Team League Data", filter_val=row['Team League Data'])
+            new_logo = select_from_list(
+                "Select Logo ID",
+                f"Select the correct Logo ID for team '{row['Team League Data']}':",
+                logo_options,
+                show_images=True,
+                image_folder=LOGOS_FOLDER
+            )
+            if new_logo:
+                wrong_details["Logo ID"] = new_logo
+        if "Parent Color Primary" in wrong_fields:
+            color_options = load_csv_column("ColorList.csv", "Parent Color Primary", filter_col="Team League Data", filter_val=row['Team League Data'])
+            new_color = select_from_list("Select Parent Color Primary", f"Select the correct Parent Color Primary for team '{row['Team League Data']}':", color_options)
+            if new_color:
+                wrong_details["Parent Color Primary"] = new_color
+        if "Class Mapping" in wrong_fields:
+            class_options = load_csv_column("ClassMappingList.csv", "Name")
+            new_class = select_from_list("Select Class Mapping", "Select the correct Class Mapping:", class_options)
+            if new_class:
+                wrong_details["Class Mapping"] = new_class
+
+        # Return both the wrong fields and the new values chosen
+        return {"fields": wrong_fields, "details": wrong_details}
 
     def undo_last(self):
         # Undo the last user action (not auto-rejected)
@@ -283,30 +397,31 @@ class AuditApp:
     def save_outputs(self):
         if not self.choices:
             return
-        # Check if wrong field info is present
         has_wrong_field = any(len(choice) > 3 for choice in self.choices)
         accepted = [row for status, row, *rest in self.choices if status == 'accepted']
         to_audit = []
         wrong_fields = []
+        wrong_details_list = []
         for choice in self.choices:
             if choice[0] == 'to_audit':
                 to_audit.append(choice[1])
                 if len(choice) > 3:
-                    # Join multiple fields with semicolon for CSV
                     wrong_fields.append("; ".join(choice[3]) if isinstance(choice[3], list) else str(choice[3]))
                 else:
                     wrong_fields.append("")
-
-        # Columns to exclude
+                if len(choice) > 4:
+                    # Save details as a stringified dict
+                    wrong_details_list.append(str(choice[4]))
+                else:
+                    wrong_details_list.append("")
         exclude_cols = {"Picture ID", "Image Assignment"}
-
         if to_audit:
             to_audit_df = pd.DataFrame(to_audit)
             to_audit_df = to_audit_df[[col for col in to_audit_df.columns if col not in exclude_cols]]
             if has_wrong_field:
                 to_audit_df["Wrong Field"] = wrong_fields
+                to_audit_df["Wrong Field Details"] = wrong_details_list
             to_audit_df.to_csv("to_audit.csv", index=False)
-
         # Delete TEMP folder contents
         if os.path.exists(TEMP_FOLDER):
             for filename in os.listdir(TEMP_FOLDER):
