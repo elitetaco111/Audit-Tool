@@ -270,11 +270,12 @@ class AuditApp:
             sel_popup = tk.Toplevel(self.root)
             sel_popup.title(title)
             sel_popup.grab_set()
+            sel_popup.focus_force()  # Focus the popup window
             self.root.attributes('-disabled', True)
             tk.Label(sel_popup, text=label).pack(padx=50, pady=10)
 
-            # Make the listbox wider
-            listbox_width = 60  # Increase as needed
+            # Make the listbox much wider
+            listbox_width = 80  # Wider for long values
 
             var = tk.StringVar(value=options[0] if options else "")
             listbox = tk.Listbox(
@@ -285,6 +286,7 @@ class AuditApp:
                 exportselection=False
             )
             listbox.pack(side=tk.LEFT, padx=(50, 10), pady=10, fill=tk.Y)
+            listbox.focus_set()  # Focus the listbox for keyboard navigation
 
             # For showing images next to Logo ID options
             image_label = None
@@ -316,12 +318,19 @@ class AuditApp:
                     show_logo_img(None)
 
             result = {"value": None}
-            def on_select():
+            def on_select(event=None):
                 sel = listbox.curselection()
                 if sel:
                     result["value"] = options[sel[0]]
                     sel_popup.destroy()
-            tk.Button(sel_popup, text="OK", command=on_select).pack(pady=10)
+
+            # OK button at the bottom
+            btn_frame = tk.Frame(sel_popup)
+            btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 20))
+            ok_btn = tk.Button(btn_frame, text="OK", command=on_select)
+            ok_btn.pack()
+            sel_popup.bind('<Return>', on_select)  # Allow Enter key to confirm
+
             sel_popup.wait_window()
             self.root.attributes('-disabled', False)
             self.root.focus_force()
