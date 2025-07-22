@@ -32,14 +32,11 @@ def download_image(identifier, save_as, folder_name, base_url='https://media.ral
         print(f"Failed to download {save_as}: {e}")
         return False
 
-def download_images(csv_file, folder_name, item_col='Name', picture_id_col='Picture ID', max_workers=None, base_url='https://media.rallyhouse.com/homepage/{}-1.jpg?tx=f_auto,c_fit,w_730,h_730'):
+def download_images(csv_file, folder_name, item_col='Name', picture_id_col='Picture ID', max_workers=12, base_url='https://media.rallyhouse.com/homepage/{}-1.jpg?tx=f_auto,c_fit,w_730,h_730'):
     ensure_folder(folder_name)
     dataFile = read_csv(csv_file)
     if item_col not in dataFile.columns or picture_id_col not in dataFile.columns:
         raise ValueError(f"'{item_col}' or '{picture_id_col}' column not found in the CSV file.")
-    if max_workers is None:
-        cpu_count = os.cpu_count() or 2
-        max_workers = max(cpu_count - 1, 1)
     tasks = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         for _, row in dataFile.iterrows():
@@ -50,11 +47,11 @@ def download_images(csv_file, folder_name, item_col='Name', picture_id_col='Pict
             else:
                 tasks.append(executor.submit(download_image, picture_id, name, folder_name, base_url))
         concurrent.futures.wait(tasks)
-    print(f'Download Complete')
+    print('Download Complete')
 
 if __name__ == "__main__":
-    URL = 'https://media.rallyhouse.com/homepage/{}-1.jpg?tx=f_auto,c_fit,w_730,h_730'
-    TEAM_CODE = "um"
-    INPUT_CSV = f'data_{TEAM_CODE}.csv'
-    IMAGE_FOLDER = f'{TEAM_CODE}_images'
-    download_images(INPUT_CSV, IMAGE_FOLDER, base_url=URL)
+    HALEY = 'https://media.rallyhouse.com/homepage/{}-1.jpg?tx=f_auto,c_fit,w_730,h_730'
+    MY_FOREVER_LOVE = "osu"
+    I_MISS_MY_GF = f'data_{MY_FOREVER_LOVE}.csv'
+    I_LOVE_MY_GF_HALEY = f'{MY_FOREVER_LOVE}_images'
+    download_images(I_MISS_MY_GF, I_LOVE_MY_GF_HALEY, base_url=HALEY)
