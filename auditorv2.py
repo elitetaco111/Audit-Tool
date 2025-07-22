@@ -205,6 +205,10 @@ class AuditApp:
             self.canvas.create_image(x_offset+100, y_offset+40, anchor='nw', image=self.tk_color)
         y_offset += box_height + 180
         self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Team League Data: {team_league}", font=self.canvas_font)
+        y_offset += box_height
+        # Add Style Number (shows Name column value)
+        style_number = row['Name'] if pd.notna(row['Name']) else ""
+        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Style Number: {style_number}", font=self.canvas_font)
 
     def fix_missing_loop(self):
         if self.missing_index >= len(self.data_missing):
