@@ -2,7 +2,7 @@ import os
 import sys
 import shutil
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
 import pandas as pd
 import download_helper
@@ -332,52 +332,69 @@ class AuditApp:
             sel_popup = tk.Toplevel(self.root)
             sel_popup.title(title)
             sel_popup.grab_set()
-            sel_popup.focus_force()  # Focus the popup window
+            sel_popup.focus_force()
             self.root.attributes('-disabled', True)
             tk.Label(sel_popup, text=label).pack(padx=50, pady=10)
-            listbox_width = 80
-            var = tk.StringVar(value=options[0] if options else "")
+
+            # Search bar
+            search_var = tk.StringVar()
+            search_entry = tk.Entry(sel_popup, textvariable=search_var, width=60)
+            search_entry.pack(padx=50, pady=(0, 10))
+
+            # Listbox
+            filtered_options = options.copy()
+            listbox_var = tk.StringVar(value=filtered_options)
             listbox = tk.Listbox(
                 sel_popup,
-                listvariable=tk.StringVar(value=options),
-                width=listbox_width,
-                height=min(15, len(options)),
+                listvariable=listbox_var,
+                width=80,
+                height=min(15, len(filtered_options)),
                 exportselection=False
             )
             listbox.pack(side=tk.LEFT, padx=(50, 10), pady=10, fill=tk.Y)
-            listbox.focus_set()  # Focus the listbox for keyboard navigation
+            listbox.focus_set()
 
-            # For showing images next to Logo ID options
+            # Image preview (if needed)
             image_label = None
             img_cache = {}
+            def show_logo_img(event):
+                sel = listbox.curselection()
+                if sel and show_images and image_folder:
+                    logo_id = filtered_options[sel[0]]
+                    img_path = find_image(image_folder, logo_id)
+                    if img_path and os.path.exists(img_path):
+                        img = Image.open(img_path)
+                        img = img.resize((150, 150))
+                        tk_img = ImageTk.PhotoImage(img)
+                        img_cache["img"] = tk_img
+                        image_label.config(image=tk_img, text="")
+                    else:
+                        image_label.config(image="", text="No image found")
+                elif image_label:
+                    image_label.config(image="", text="")
             if show_images and image_folder:
                 image_label = tk.Label(sel_popup)
                 image_label.pack(side=tk.LEFT, padx=(10, 50), pady=10, fill=tk.BOTH, expand=True)
-                def show_logo_img(event):
-                    sel = listbox.curselection()
-                    if sel:
-                        logo_id = options[sel[0]]
-                        img_path = find_image(image_folder, logo_id)
-                        if img_path and os.path.exists(img_path):
-                            img = Image.open(img_path)
-                            img = img.resize((150, 150))
-                            tk_img = ImageTk.PhotoImage(img)
-                            img_cache["img"] = tk_img
-                            image_label.config(image=tk_img, text="")
-                        else:
-                            image_label.config(image="", text="No image found")
-                    else:
-                        image_label.config(image="", text="")
                 listbox.bind("<<ListboxSelect>>", show_logo_img)
-                # Show image for first item by default
-                if options:
+
+            # Filter function
+            def filter_options(*args):
+                search = search_var.get().lower()
+                nonlocal filtered_options
+                filtered_options = [opt for opt in options if search in opt.lower()]
+                listbox_var.set(filtered_options)
+                if filtered_options:
+                    listbox.selection_clear(0, tk.END)
                     listbox.selection_set(0)
                     show_logo_img(None)
+            search_var.trace_add("write", filter_options)
+
+            # Select function
             result = {"value": None}
             def on_select(event=None):
                 sel = listbox.curselection()
                 if sel:
-                    result["value"] = options[sel[0]]
+                    result["value"] = filtered_options[sel[0]]
                     sel_popup.destroy()
             btn_frame = tk.Frame(sel_popup)
             btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 20))
