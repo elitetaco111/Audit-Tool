@@ -284,7 +284,7 @@ class AuditApp:
         self.index += 1
         self.show_image()
 
-    def ask_wrong_fields(self, row, preselected_fields=None):
+    def ask_wrong_fields(self, row, preselected_fields=None, force_fix=False):
         fields = [
             "Logo ID",
             "Class Mapping",
@@ -299,11 +299,13 @@ class AuditApp:
         popup.title("Select the field(s) that are wrong")
         popup.grab_set()
         popup.transient(self.root)
+        popup.lift()
+        popup.focus_force()
         self.root.unbind('<Left>')
         self.root.unbind('<Right>')
         self.root.attributes('-disabled', True)
 
-        main_frame = ttk.Frame(popup, padding=20)
+        main_frame = ttk.Frame(popup, padding=60)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         ttk.Label(main_frame, text="Which field(s) are wrong?").pack(pady=(0, 10), anchor='w')
@@ -343,8 +345,13 @@ class AuditApp:
                 return
             popup.destroy()
             result["value"] = selected
-        popup.protocol("WM_DELETE_WINDOW", lambda: popup.destroy())
+        # Prevent closing if force_fix is True
+        if force_fix:
+            popup.protocol("WM_DELETE_WINDOW", lambda: None)
+        else:
+            popup.protocol("WM_DELETE_WINDOW", lambda: popup.destroy())
         ttk.Button(main_frame, text="OK", command=submit).pack(pady=10)
+        popup.bind('<Return>', lambda event: submit())
         popup.wait_window()
         self.root.attributes('-disabled', False)
         self.root.bind('<Left>', self.mark_wrong)
@@ -373,6 +380,7 @@ class AuditApp:
             search_var = tk.StringVar()
             search_entry = ttk.Entry(main_frame, textvariable=search_var, width=60)
             search_entry.pack(pady=(0, 10), anchor='w')
+            search_entry.focus_set()  # enable this if you want the search entry to be focused initially
 
             filtered_options = options.copy()
             listbox_var = tk.StringVar(value=filtered_options)
@@ -388,7 +396,7 @@ class AuditApp:
                 borderwidth=0
             )
             listbox.pack(side=tk.LEFT, pady=10, fill=tk.Y)
-            listbox.focus_set()
+            # listbox.focus_set()  # enable this if you want the listbox to be focused initially
 
             image_label = None
             img_cache = {}
