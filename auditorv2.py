@@ -8,6 +8,7 @@ import pandas as pd
 import download_helper
 import csv
 from ttkthemes import ThemedTk
+import threading
 
 """
 Developed by Dave Nissly
@@ -79,6 +80,21 @@ class AuditApp:
         else:
             self.btn_load = tk.Button(self.frame, text="Load CSV", command=self.load_csv)
         self.btn_load.pack(pady=10)
+
+        style = ttk.Style(self.root)
+        style.theme_use("arc")
+        style.configure("big.Horizontal.TProgressbar", thickness=30, troughcolor="#e0e0e0", background="#4a90e2")
+
+        self.progress_var = tk.DoubleVar(value=0)
+        self.progress_bar = ttk.Progressbar(
+            self.frame,
+            variable=self.progress_var,
+            maximum=100,
+            length=600,
+            style="big.Horizontal.TProgressbar"
+        )
+        self.progress_bar.pack(pady=30, side=tk.TOP)  # <-- Explicitly pack at the top
+
         self.canvas = tk.Canvas(self.frame, width=1920, height=1080, bg="white")
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas_font = ("Roboto", 24)
@@ -87,7 +103,7 @@ class AuditApp:
         back_img_path = resource_path("back.png")
         if os.path.exists(back_img_path):
             back_img = Image.open(back_img_path)
-            back_img = back_img.resize((100, 100))
+            back_img = back_img.resize((148, 148))
             self.tk_back_img = ImageTk.PhotoImage(back_img)
             self.btn_back = tk.Button(self.frame, image=self.tk_back_img, command=self.undo_last, borderwidth=0)
         else:
@@ -98,25 +114,57 @@ class AuditApp:
         file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
         if not file_path:
             return
-        self.data = pd.read_csv(file_path, dtype=str)
-        download_helper.download_images(file_path, TEMP_FOLDER, item_col='Name', picture_id_col='Picture ID')
-        self.data.reset_index(drop=True, inplace=True)
-        self.index = 0
-        self.choices = []
-        self.missing_rows = []
-        self.missing_index = 0
-        self.data_missing = None
         self.btn_load.pack_forget()
-        bg_path = resource_path("background.png")
-        if os.path.exists(bg_path):
-            bg_img = Image.open(bg_path)
-            bg_img = bg_img.resize((1920, 1080))
-            self.tk_bg_img = ImageTk.PhotoImage(bg_img)
-            # Draw background image as the first (bottom) item on the canvas
-            self.bg_image_id = self.canvas.create_image(0, 0, anchor='nw', image=self.tk_bg_img)
-            self.canvas.tag_lower(self.bg_image_id)  # Ensure it's at the very back
+        self.progress_var.set(0)
+        self.progress_bar.pack(pady=30)
+        self.progress_bar.lift()
+        self.progress_bar.update_idletasks()
 
-        self.show_image()
+        self.data = pd.read_csv(file_path, dtype=str)
+        total_images = len(self.data)
+
+        # Start download in a background thread
+        threading.Thread(
+            target=self.download_images_thread,
+            args=(file_path, TEMP_FOLDER),
+            daemon=True
+        ).start()
+
+        # Start polling for progress in the main thread
+        self.poll_progress(total_images)
+
+    def download_images_thread(self, file_path, temp_folder):
+        download_helper.download_images(file_path, temp_folder, item_col='Name', picture_id_col='Picture ID')
+
+    def poll_progress(self, total_images):
+        downloaded = len([f for f in os.listdir(TEMP_FOLDER) if f.lower().endswith('.jpg') or f.lower().endswith('.png')])
+        percent = (downloaded / total_images) * 100 if total_images else 0
+        self.progress_var.set(percent)
+        self.progress_bar.update_idletasks()
+        self.progress_bar.lift()
+        self.root.update_idletasks()
+        if downloaded >= total_images:
+            self.progress_bar.pack_forget()
+            # Continue with rest of setup
+            self.data.reset_index(drop=True, inplace=True)
+            self.index = 0
+            self.choices = []
+            self.missing_rows = []
+            self.missing_index = 0
+            self.data_missing = None
+            self.btn_load.pack_forget()
+            bg_path = resource_path("background.png")
+            if os.path.exists(bg_path):
+                bg_img = Image.open(bg_path)
+                bg_img = bg_img.resize((1920, 1080))
+                self.tk_bg_img = ImageTk.PhotoImage(bg_img)
+                # Draw background image as the first (bottom) item on the canvas
+                self.bg_image_id = self.canvas.create_image(0, 0, anchor='nw', image=self.tk_bg_img)
+                self.canvas.tag_lower(self.bg_image_id)  # Ensure it's at the very back
+
+            self.show_image()
+        else:
+            self.root.after(100, lambda: self.poll_progress(total_images))
 
     def show_image(self):
         if self.data is None or self.index >= len(self.data):
@@ -150,7 +198,7 @@ class AuditApp:
             return
 
         self.display_row(row)
-        self.btn_back.place(x=205, y=750)
+        #self.btn_back.place(x=205, y=750)
 
     def display_row(self, row):
         logo_id = row['Logo ID'] if pd.notna(row['Logo ID']) else ""
@@ -177,8 +225,17 @@ class AuditApp:
         else:
             self.canvas.create_text(img_x + 100, img_y + 100, text="Image not found", anchor='nw', font=self.canvas_font)
 
-        # Place the back button under the product image
-        self.btn_back.place(x=img_x + 205, y=img_y + 750)  # Centered under image
+        # Remove any previous button window from the canvas
+        if hasattr(self, 'btn_back_canvas_id'):
+            self.canvas.delete(self.btn_back_canvas_id)
+
+        # Create the button directly on the canvas, matching the image size
+        btn_x = img_x + (511 // 2)  # Center of product image
+        btn_y = img_y + 730 + 50    # 50px below the image
+        self.btn_back.config(bg="white", activebackground="white", highlightthickness=0, bd=0)
+        self.btn_back_canvas_id = self.canvas.create_window(
+            btn_x, btn_y, anchor='n', window=self.btn_back, width=100, height=100
+        )
 
         # Info boxes, at least 50px to the right of the product image
         x_offset = 511 + 50
@@ -495,10 +552,26 @@ class AuditApp:
         # Return both the wrong fields and the new values chosen
         return {"fields": wrong_fields, "details": wrong_details}
 
+    def download_images_with_progress(self, file_path, temp_folder, total_images):
+        # Start download in main thread (for simplicity)
+        download_helper.download_images(file_path, temp_folder, item_col='Name', picture_id_col='Picture ID')
+        # Poll for progress
+        while True:
+            downloaded = len([f for f in os.listdir(temp_folder) if f.lower().endswith('.jpg') or f.lower().endswith('.png')])
+            percent = (downloaded / total_images) * 100 if total_images else 0
+            self.progress_var.set(percent)
+            self.progress_bar.update_idletasks()
+            self.progress_bar.lift()
+            self.root.update_idletasks()
+            if downloaded >= total_images:
+                break
+            self.root.after(10)  # Wait a bit before checking again
+
     def undo_last(self):
         # Undo the last user action (not auto-rejected)
         for i in range(len(self.choices) - 1, -1, -1):
-            status, row, auto_rejected = self.choices[i]
+            entry = self.choices[i]
+            status, row, auto_rejected = entry[:3]  # Only take the first three values
             if not auto_rejected:
                 self.choices.pop(i)
                 self.index = row.name  # row.name is the original index in DataFrame
@@ -518,17 +591,12 @@ class AuditApp:
         exclude_cols = {"Picture ID", "Image Assignment"}
         output_df = self.data[[col for col in self.data.columns if col not in exclude_cols]]
         output_df.to_csv("to_audit.csv", index=False)
-        # Delete TEMP folder contents
+        # Delete the entire TEMP folder
         if os.path.exists(TEMP_FOLDER):
-            for filename in os.listdir(TEMP_FOLDER):
-                file_path = os.path.join(TEMP_FOLDER, filename)
-                try:
-                    if os.path.isfile(file_path) or os.path.islink(file_path):
-                        os.unlink(file_path)
-                    elif os.path.isdir(file_path):
-                        shutil.rmtree(file_path)
-                except Exception as e:
-                    print(f"Failed to delete {file_path}: {e}")
+            try:
+                shutil.rmtree(TEMP_FOLDER)
+            except Exception as e:
+                print(f"Failed to delete TEMP folder: {e}")
 
     def on_close(self):
         self.save_outputs()
