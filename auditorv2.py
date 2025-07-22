@@ -8,6 +8,18 @@ import pandas as pd
 import download_helper
 import csv
 
+"""
+Developed by Dave Nissly
+Rally House Product Audit Tool
+This tool is designed to help audit product images and metadata.
+It allows users to load a CSV file, view product images, and mark them as correct or incorrect.
+It also provides functionality to handle missing or incorrect data by allowing users to select the correct values from predefined lists.
+
+github.com/elitetaco111/audit-tool
+
+To Package: pyinstaller --onefile --noconsole --hidden-import=tkinter --add-data "ColorList.csv;." --add-data "LogoList.csv;." --add-data "TeamList.csv;." --add-data "ClassMappingList.csv;." --add-data "choose.png;." --add-data "back.png;." --add-data "background.png;." --add-data "Logos;Logos" --add-data "Colors;Colors" auditor.py
+"""
+
 TEMP_FOLDER = "TEMP"
 LOGOS_FOLDER = "Logos"
 COLORS_FOLDER = "Colors"
@@ -46,6 +58,9 @@ class AuditApp:
         self.images = []
         self.logo_imgs = []
         self.color_imgs = []
+        self.missing_rows = []
+        self.missing_index = 0
+        self.data_missing = None
         self.setup_ui()
         self.root.bind('<Left>', self.mark_wrong)
         self.root.bind('<Right>', self.mark_right)
@@ -54,20 +69,17 @@ class AuditApp:
     def setup_ui(self):
         self.frame = tk.Frame(self.root)
         self.frame.pack(fill=tk.BOTH, expand=True)
-        # Replace button with image button
         choose_img_path = resource_path("choose.png")
         if os.path.exists(choose_img_path):
             choose_img = Image.open(choose_img_path)
-            choose_img = choose_img.resize((200, 200))  # Resize as needed
+            choose_img = choose_img.resize((200, 200))
             self.tk_choose_img = ImageTk.PhotoImage(choose_img)
             self.btn_load = tk.Button(self.frame, image=self.tk_choose_img, command=self.load_csv, borderwidth=0)
         else:
             self.btn_load = tk.Button(self.frame, text="Load CSV", command=self.load_csv)
         self.btn_load.pack(pady=10)
-        # Make canvas large enough for fullscreen and info
         self.canvas = tk.Canvas(self.frame, width=1920, height=1080, bg="white")
         self.canvas.pack(fill=tk.BOTH, expand=True)
-        # Set default font for canvas text
         self.canvas_font = ("Roboto", 24)
 
         # Add back button (hidden until images are shown)
@@ -79,7 +91,7 @@ class AuditApp:
             self.btn_back = tk.Button(self.frame, image=self.tk_back_img, command=self.undo_last, borderwidth=0)
         else:
             self.btn_back = tk.Button(self.frame, text="Back", command=self.undo_last)
-        self.btn_back.place_forget()  # Hide initially
+        self.btn_back.place_forget()
 
     def load_csv(self):
         file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
@@ -90,13 +102,14 @@ class AuditApp:
         self.data.reset_index(drop=True, inplace=True)
         self.index = 0
         self.choices = []
-        self.btn_load.pack_forget()  # Hide the choose file button after loading
-
-        # Set background to background.png if it exists
+        self.missing_rows = []
+        self.missing_index = 0
+        self.data_missing = None
+        self.btn_load.pack_forget()
         bg_path = resource_path("background.png")
         if os.path.exists(bg_path):
             bg_img = Image.open(bg_path)
-            bg_img = bg_img.resize((1920, 1080))  # Resize as needed for your canvas
+            bg_img = bg_img.resize((1920, 1080))
             self.tk_bg_img = ImageTk.PhotoImage(bg_img)
             # Draw background image as the first (bottom) item on the canvas
             self.bg_image_id = self.canvas.create_image(0, 0, anchor='nw', image=self.tk_bg_img)
@@ -106,6 +119,13 @@ class AuditApp:
 
     def show_image(self):
         if self.data is None or self.index >= len(self.data):
+            # Start missing info fix loop if needed
+            if self.missing_rows:
+                indices, rows = zip(*self.missing_rows)
+                self.data_missing = pd.DataFrame(list(rows), index=list(indices)).astype('object')
+                self.missing_index = 0
+                self.fix_missing_loop()
+                return
             self.finish()
             return
         row = self.data.iloc[self.index]
@@ -115,7 +135,7 @@ class AuditApp:
         color_id = row['Parent Color Primary'] if pd.notna(row['Parent Color Primary']) else ""
         team_league = row['Team League Data'] if pd.notna(row['Team League Data']) else ""
 
-        # Reject if any required field is blank or Logo ID contains "-TBD"
+        # Track missing info rows, but show them normally
         if (
             not logo_id or
             not class_mapping or
@@ -123,11 +143,19 @@ class AuditApp:
             not team_league or
             "-tbd" in logo_id.lower()
         ):
-            self.choices.append(('to_audit', row, True))  # Mark as auto-rejected
+            self.missing_rows.append((self.index, row.copy()))
             self.index += 1
             self.show_image()
             return
 
+        self.display_row(row)
+        self.btn_back.place(x=205, y=750)
+
+    def display_row(self, row):
+        logo_id = row['Logo ID'] if pd.notna(row['Logo ID']) else ""
+        class_mapping = row['Class Mapping'] if pd.notna(row['Class Mapping']) else ""
+        color_id = row['Parent Color Primary'] if pd.notna(row['Parent Color Primary']) else ""
+        team_league = row['Team League Data'] if pd.notna(row['Team League Data']) else ""
         img_path = os.path.join(TEMP_FOLDER, f"{row['Name']}.jpg")
         logo_path = find_image(LOGOS_FOLDER, logo_id)
         color_path = find_image(COLORS_FOLDER, color_id)
@@ -175,9 +203,43 @@ class AuditApp:
             self.tk_color = ImageTk.PhotoImage(color_img)
             self.canvas.create_image(x_offset+100, y_offset+40, anchor='nw', image=self.tk_color)
         y_offset += box_height + 180
-
-        # Team League Data
         self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Team League Data: {team_league}", font=self.canvas_font)
+
+    def fix_missing_loop(self):
+        if self.missing_index >= len(self.data_missing):
+            self.finish()
+            return
+        row = self.data_missing.iloc[self.missing_index]
+        # Detect missing/invalid fields for autoselection
+        missing_fields = []
+        if not row['Logo ID'] or pd.isna(row['Logo ID']):
+            missing_fields.append("Logo ID")
+        if not row['Class Mapping'] or pd.isna(row['Class Mapping']):
+            missing_fields.append("Class Mapping")
+        if not row['Parent Color Primary'] or pd.isna(row['Parent Color Primary']):
+            missing_fields.append("Parent Color Primary")
+        if not row['Team League Data'] or pd.isna(row['Team League Data']):
+            missing_fields.append("Team League Data")
+        #add more checks if needed here
+
+        self.display_row(row)
+        self.btn_back.place_forget()
+        self._popup_open = True
+        wrong_info = self.ask_wrong_fields(row, preselected_fields=missing_fields)
+        self._popup_open = False
+        wrong_fields = wrong_info["fields"] if isinstance(wrong_info, dict) else []
+        wrong_details = wrong_info["details"] if isinstance(wrong_info, dict) else {}
+        if not wrong_fields or (isinstance(wrong_fields, list) and all(f.strip() == "" for f in wrong_fields)):
+            messagebox.showwarning("Input required", "You must select at least one field that is wrong before continuing.")
+            return
+        # Update the row in self.data_missing and self.data with corrected values
+        row_idx = row.name  # This is now the original index in self.data
+        for field, value in wrong_details.items():
+            self.data_missing.at[row_idx, field] = str(value)
+            self.data.at[row_idx, field] = str(value)
+        self.choices.append(('to_audit', row, False, wrong_fields, wrong_details))
+        self.missing_index += 1
+        self.fix_missing_loop()
 
     def mark_right(self, event=None):
         # Prevent advancing if popup is open
@@ -192,22 +254,22 @@ class AuditApp:
         if getattr(self, "_popup_open", False):
             return
         self._popup_open = True
-
         row = self.data.iloc[self.index]
         wrong_info = self.ask_wrong_fields(row)
         self._popup_open = False
-
         wrong_fields = wrong_info["fields"] if isinstance(wrong_info, dict) else []
         wrong_details = wrong_info["details"] if isinstance(wrong_info, dict) else {}
-
         if not wrong_fields or (isinstance(wrong_fields, list) and all(f.strip() == "" for f in wrong_fields)):
             messagebox.showwarning("Input required", "You must select at least one field that is wrong before continuing.")
             return
+        # Update the row in self.data with corrected values
+        for field, value in wrong_details.items():
+            self.data.at[row.name, field] = value
         self.choices.append(('to_audit', row, False, wrong_fields, wrong_details))
         self.index += 1
         self.show_image()
 
-    def ask_wrong_fields(self, row):
+    def ask_wrong_fields(self, row, preselected_fields=None):
         fields = [
             "Logo ID",
             "Class Mapping",
@@ -222,13 +284,15 @@ class AuditApp:
         self.root.unbind('<Left>')
         self.root.unbind('<Right>')
         self.root.attributes('-disabled', True)
-
         tk.Label(popup, text="Which field(s) are wrong?").pack(padx=20, pady=10)
-
         vars = {field: tk.BooleanVar(value=False) for field in fields}
+        # Preselect missing fields
+        if preselected_fields:
+            for field in preselected_fields:
+                if field in vars:
+                    vars[field].set(True)
         for field in fields:
             tk.Checkbutton(popup, text=field, variable=vars[field]).pack(anchor='w', padx=20)
-
         custom_var = tk.StringVar()
         entry = tk.Entry(popup, textvariable=custom_var)
         def on_other_checked(*args):
@@ -237,7 +301,6 @@ class AuditApp:
             else:
                 entry.pack_forget()
         vars["Other"].trace_add("write", on_other_checked)
-
         result = {"value": None, "details": {}}
         def submit():
             selected = [field for field in fields if vars[field].get() and field != "Other"]
@@ -252,7 +315,6 @@ class AuditApp:
                 return
             popup.destroy()
             result["value"] = selected
-
         popup.protocol("WM_DELETE_WINDOW", lambda: popup.destroy())
         tk.Button(popup, text="OK", command=submit).pack(pady=10)
         popup.wait_window()
@@ -273,10 +335,7 @@ class AuditApp:
             sel_popup.focus_force()  # Focus the popup window
             self.root.attributes('-disabled', True)
             tk.Label(sel_popup, text=label).pack(padx=50, pady=10)
-
-            # Make the listbox much wider
-            listbox_width = 80  # Wider for long values
-
+            listbox_width = 80
             var = tk.StringVar(value=options[0] if options else "")
             listbox = tk.Listbox(
                 sel_popup,
@@ -291,11 +350,9 @@ class AuditApp:
             # For showing images next to Logo ID options
             image_label = None
             img_cache = {}
-
             if show_images and image_folder:
                 image_label = tk.Label(sel_popup)
                 image_label.pack(side=tk.LEFT, padx=(10, 50), pady=10, fill=tk.BOTH, expand=True)
-
                 def show_logo_img(event):
                     sel = listbox.curselection()
                     if sel:
@@ -303,9 +360,9 @@ class AuditApp:
                         img_path = find_image(image_folder, logo_id)
                         if img_path and os.path.exists(img_path):
                             img = Image.open(img_path)
-                            img = img.resize((150, 150))  # Adjust size as needed
+                            img = img.resize((150, 150))
                             tk_img = ImageTk.PhotoImage(img)
-                            img_cache["img"] = tk_img  # Prevent garbage collection
+                            img_cache["img"] = tk_img
                             image_label.config(image=tk_img, text="")
                         else:
                             image_label.config(image="", text="No image found")
@@ -316,21 +373,17 @@ class AuditApp:
                 if options:
                     listbox.selection_set(0)
                     show_logo_img(None)
-
             result = {"value": None}
             def on_select(event=None):
                 sel = listbox.curselection()
                 if sel:
                     result["value"] = options[sel[0]]
                     sel_popup.destroy()
-
-            # OK button at the bottom
             btn_frame = tk.Frame(sel_popup)
             btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 20))
             ok_btn = tk.Button(btn_frame, text="OK", command=on_select)
             ok_btn.pack()
-            sel_popup.bind('<Return>', on_select)  # Allow Enter key to confirm
-
+            sel_popup.bind('<Return>', on_select)
             sel_popup.wait_window()
             self.root.attributes('-disabled', False)
             self.root.focus_force()
@@ -359,8 +412,6 @@ class AuditApp:
                 # Update row for filtering other fields
                 row = row.copy()
                 row['Team League Data'] = new_team
-
-        # Now handle other fields, filtering by team if needed
         team_val = row['Team League Data'] if pd.notna(row['Team League Data']) else ""
         if "Logo ID" in wrong_fields:
             logo_options = load_csv_column("LogoList.csv", "Logo ID", filter_col="Team League Data", filter_val=row['Team League Data'])
@@ -404,33 +455,12 @@ class AuditApp:
         self.root.quit()
 
     def save_outputs(self):
-        if not self.choices:
+        if self.data is None or self.data.empty:
             return
-        has_wrong_field = any(len(choice) > 3 for choice in self.choices)
-        accepted = [row for status, row, *rest in self.choices if status == 'accepted']
-        to_audit = []
-        wrong_fields = []
-        wrong_details_list = []
-        for choice in self.choices:
-            if choice[0] == 'to_audit':
-                to_audit.append(choice[1])
-                if len(choice) > 3:
-                    wrong_fields.append("; ".join(choice[3]) if isinstance(choice[3], list) else str(choice[3]))
-                else:
-                    wrong_fields.append("")
-                if len(choice) > 4:
-                    # Save details as a stringified dict
-                    wrong_details_list.append(str(choice[4]))
-                else:
-                    wrong_details_list.append("")
+        # Save the corrected DataFrame (excluding Picture ID and Image Assignment)
         exclude_cols = {"Picture ID", "Image Assignment"}
-        if to_audit:
-            to_audit_df = pd.DataFrame(to_audit)
-            to_audit_df = to_audit_df[[col for col in to_audit_df.columns if col not in exclude_cols]]
-            if has_wrong_field:
-                to_audit_df["Wrong Field"] = wrong_fields
-                to_audit_df["Wrong Field Details"] = wrong_details_list
-            to_audit_df.to_csv("to_audit.csv", index=False)
+        output_df = self.data[[col for col in self.data.columns if col not in exclude_cols]]
+        output_df.to_csv("to_audit.csv", index=False)
         # Delete TEMP folder contents
         if os.path.exists(TEMP_FOLDER):
             for filename in os.listdir(TEMP_FOLDER):
