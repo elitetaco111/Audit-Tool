@@ -7,6 +7,7 @@ from PIL import Image, ImageTk
 import pandas as pd
 import download_helper
 import csv
+from ttkthemes import ThemedTk
 
 """
 Developed by Dave Nissly
@@ -278,26 +279,32 @@ class AuditApp:
             "Other"
         ]
         popup = tk.Toplevel(self.root)
+        style = ttk.Style(popup)
+        style.theme_use("arc")
+        popup.configure(bg="#f7f7f7")
         popup.title("Select the field(s) that are wrong")
         popup.grab_set()
         popup.transient(self.root)
         self.root.unbind('<Left>')
         self.root.unbind('<Right>')
         self.root.attributes('-disabled', True)
-        tk.Label(popup, text="Which field(s) are wrong?").pack(padx=20, pady=10)
+
+        main_frame = ttk.Frame(popup, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(main_frame, text="Which field(s) are wrong?").pack(pady=(0, 10), anchor='w')
         vars = {field: tk.BooleanVar(value=False) for field in fields}
-        # Preselect missing fields
         if preselected_fields:
             for field in preselected_fields:
                 if field in vars:
                     vars[field].set(True)
         for field in fields:
-            tk.Checkbutton(popup, text=field, variable=vars[field]).pack(anchor='w', padx=20)
+            ttk.Checkbutton(main_frame, text=field, variable=vars[field]).pack(anchor='w', pady=2)
         custom_var = tk.StringVar()
-        entry = tk.Entry(popup, textvariable=custom_var)
+        entry = ttk.Entry(main_frame, textvariable=custom_var)
         def on_other_checked(*args):
             if vars["Other"].get():
-                entry.pack(padx=20, pady=5)
+                entry.pack(pady=5, anchor='w')
             else:
                 entry.pack_forget()
         vars["Other"].trace_add("write", on_other_checked)
@@ -310,13 +317,20 @@ class AuditApp:
                     selected.append(other_text)
                 else:
                     selected.append("Other")
+            # --- ENFORCE LOGIC HERE ---
+            if "Team League Data" in selected:
+                if "Parent Color Primary" not in selected:
+                    selected.append("Parent Color Primary")
+                if "Logo ID" not in selected:
+                    selected.append("Logo ID")
+            # --------------------------
             if not selected:
                 messagebox.showwarning("Input required", "Please select at least one field or enter a value for 'Other'.", parent=popup)
                 return
             popup.destroy()
             result["value"] = selected
         popup.protocol("WM_DELETE_WINDOW", lambda: popup.destroy())
-        tk.Button(popup, text="OK", command=submit).pack(pady=10)
+        ttk.Button(main_frame, text="OK", command=submit).pack(pady=10)
         popup.wait_window()
         self.root.attributes('-disabled', False)
         self.root.bind('<Left>', self.mark_wrong)
@@ -330,31 +344,38 @@ class AuditApp:
         # Helper to select from a list
         def select_from_list(title, label, options, show_images=False, image_folder=None):
             sel_popup = tk.Toplevel(self.root)
+            style = ttk.Style(sel_popup)
+            style.theme_use("arc")
+            sel_popup.configure(bg="#f7f7f7")
             sel_popup.title(title)
             sel_popup.grab_set()
             sel_popup.focus_force()
             self.root.attributes('-disabled', True)
-            tk.Label(sel_popup, text=label).pack(padx=50, pady=10)
 
-            # Search bar
+            main_frame = ttk.Frame(sel_popup, padding=20)
+            main_frame.pack(fill=tk.BOTH, expand=True)
+
+            ttk.Label(main_frame, text=label).pack(pady=(0, 10), anchor='w')
             search_var = tk.StringVar()
-            search_entry = tk.Entry(sel_popup, textvariable=search_var, width=60)
-            search_entry.pack(padx=50, pady=(0, 10))
+            search_entry = ttk.Entry(main_frame, textvariable=search_var, width=60)
+            search_entry.pack(pady=(0, 10), anchor='w')
 
-            # Listbox
             filtered_options = options.copy()
             listbox_var = tk.StringVar(value=filtered_options)
             listbox = tk.Listbox(
-                sel_popup,
+                main_frame,
                 listvariable=listbox_var,
                 width=80,
                 height=min(15, len(filtered_options)),
-                exportselection=False
+                exportselection=False,
+                bg="#f7f7f7",
+                relief=tk.FLAT,
+                highlightthickness=0,
+                borderwidth=0
             )
-            listbox.pack(side=tk.LEFT, padx=(50, 10), pady=10, fill=tk.Y)
+            listbox.pack(side=tk.LEFT, pady=10, fill=tk.Y)
             listbox.focus_set()
 
-            # Image preview (if needed)
             image_label = None
             img_cache = {}
             def show_logo_img(event):
@@ -373,11 +394,10 @@ class AuditApp:
                 elif image_label:
                     image_label.config(image="", text="")
             if show_images and image_folder:
-                image_label = tk.Label(sel_popup)
-                image_label.pack(side=tk.LEFT, padx=(10, 50), pady=10, fill=tk.BOTH, expand=True)
+                image_label = ttk.Label(main_frame)
+                image_label.pack(side=tk.LEFT, padx=(10, 0), pady=10, fill=tk.BOTH, expand=True)
                 listbox.bind("<<ListboxSelect>>", show_logo_img)
 
-            # Filter function
             def filter_options(*args):
                 search = search_var.get().lower()
                 nonlocal filtered_options
@@ -389,17 +409,15 @@ class AuditApp:
                     show_logo_img(None)
             search_var.trace_add("write", filter_options)
 
-            # Select function
             result = {"value": None}
             def on_select(event=None):
                 sel = listbox.curselection()
                 if sel:
                     result["value"] = filtered_options[sel[0]]
                     sel_popup.destroy()
-            btn_frame = tk.Frame(sel_popup)
-            btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 20))
-            ok_btn = tk.Button(btn_frame, text="OK", command=on_select)
-            ok_btn.pack()
+            btn_frame = ttk.Frame(main_frame)
+            btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
+            ttk.Button(btn_frame, text="OK", command=on_select).pack()
             sel_popup.bind('<Return>', on_select)
             sel_popup.wait_window()
             self.root.attributes('-disabled', False)
@@ -495,7 +513,7 @@ class AuditApp:
         self.root.destroy()
 
 if __name__ == "__main__":
-    root = tk.Tk()
+    root = ThemedTk(theme="arc")
     app = AuditApp(root)
     try:
         root.mainloop()
