@@ -206,9 +206,19 @@ class AuditApp:
         y_offset += box_height + 180
         self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Team League Data: {team_league}", font=self.canvas_font)
         y_offset += box_height
-        # Add Style Number (shows Name column value)
+
+        # Add Style Number label on canvas
+        self.canvas.create_text(x_offset, y_offset, anchor='nw', text="Style Number:", font=self.canvas_font)
+
+        # Add Style Number (shows Name column value) as a copyable Entry
         style_number = row['Name'] if pd.notna(row['Name']) else ""
-        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Style Number: {style_number}", font=self.canvas_font)
+        if hasattr(self, 'style_entry') and self.style_entry.winfo_exists():
+            self.style_entry.destroy()
+        self.style_entry = ttk.Entry(self.frame, font=self.canvas_font, width=30)
+        self.style_entry.insert(0, style_number)
+        self.style_entry.config(state='readonly')
+        # Place the entry box just to the right of the label
+        self.style_entry.place(x=x_offset + 220, y=y_offset)
 
     def fix_missing_loop(self):
         if self.missing_index >= len(self.data_missing):
