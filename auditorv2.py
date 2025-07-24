@@ -114,6 +114,9 @@ class AuditApp:
         file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
         if not file_path:
             return
+        # Ensure TEMP folder exists
+        if not os.path.exists(TEMP_FOLDER):
+            os.makedirs(TEMP_FOLDER)
         self.btn_load.pack_forget()
         self.progress_var.set(0)
         self.progress_bar.pack(pady=30)
