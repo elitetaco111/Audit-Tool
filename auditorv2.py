@@ -186,7 +186,7 @@ class AuditApp:
                     self.root.attributes('-disabled', True)
                     frame = ttk.Frame(popup, padding=40)
                     frame.pack(fill=tk.BOTH, expand=True)
-                    ttk.Label(frame, text="You are about to audit products with missing fields.\nYou must fix these products and the missing field will be autoselected for you.", font=("Roboto", 16)).pack(pady=20)
+                    ttk.Label(frame, text="You are about to audit products with missing fields.\nYou must fix these products and the missing field will be autoselected for you.", font=(self.canvas_font)).pack(pady=20)
                     def on_ok():
                         popup.destroy()
                     ttk.Button(frame, text="OK", command=on_ok).pack(pady=10)
@@ -385,6 +385,16 @@ class AuditApp:
         popup.grab_set()
         popup.transient(self.root)
         popup.lift()
+        # Position the popup in the top right corner
+        self.root.update_idletasks()
+        root_x = self.root.winfo_x()
+        root_y = self.root.winfo_y()
+        root_width = self.root.winfo_width()
+        popup_width = 500  # Adjust as needed
+        popup_height = 400 # Adjust as needed
+        x = root_x + root_width - popup_width - 40  # 40px margin from right edge
+        y = root_y + 40  # 40px margin from top edge
+        popup.geometry(f"{popup_width}x{popup_height}+{x}+{y}")
         popup.focus_force()
         self.root.unbind('<Left>')
         self.root.unbind('<Right>')
