@@ -173,6 +173,31 @@ class AuditApp:
         if self.data is None or self.index >= len(self.data):
             # Start missing info fix loop if needed
             if self.missing_rows:
+                # --- Add warning popup before fix_missing_loop ---
+                def show_missing_warning():
+                    popup = tk.Toplevel(self.root)
+                    popup.title("Missing Fields Detected")
+                    popup.grab_set()
+                    popup.transient(self.root)
+                    popup.lift()
+                    popup.focus_force()
+                    self.root.unbind('<Left>')
+                    self.root.unbind('<Right>')
+                    self.root.attributes('-disabled', True)
+                    frame = ttk.Frame(popup, padding=40)
+                    frame.pack(fill=tk.BOTH, expand=True)
+                    ttk.Label(frame, text="You are about to audit products with missing fields.\nYou must fix these products and the missing field will be autoselected for you.", font=("Roboto", 16)).pack(pady=20)
+                    def on_ok():
+                        popup.destroy()
+                    ttk.Button(frame, text="OK", command=on_ok).pack(pady=10)
+                    popup.protocol("WM_DELETE_WINDOW", lambda: None)  # Prevent closing
+                    popup.wait_window()
+                    self.root.attributes('-disabled', False)
+                    self.root.bind('<Left>', self.mark_wrong)
+                    self.root.bind('<Right>', self.mark_right)
+                    self.root.focus_force()
+                show_missing_warning()
+                # -------------------------------------------------
                 indices, rows = zip(*self.missing_rows)
                 self.data_missing = pd.DataFrame(list(rows), index=list(indices)).astype('object')
                 self.missing_index = 0
