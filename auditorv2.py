@@ -259,10 +259,10 @@ class AuditApp:
 
         # Create the button directly on the canvas, matching the image size
         btn_x = img_x + (511 // 2)  # Center of product image
-        btn_y = img_y + 730 + 50    # 50px below the image
+        btn_y = img_y + 730
         self.btn_back.config(bg="white", activebackground="white", highlightthickness=0, bd=0)
         self.btn_back_canvas_id = self.canvas.create_window(
-            btn_x, btn_y, anchor='n', window=self.btn_back, width=100, height=100
+            btn_x, btn_y, anchor='n', window=self.btn_back, width=100, height=44
         )
 
         # Info boxes, at least 50px to the right of the product image
