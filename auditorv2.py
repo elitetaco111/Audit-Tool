@@ -220,7 +220,9 @@ class AuditApp:
             not team_league or
             "-tbd" in logo_id.lower()
         ):
-            self.missing_rows.append((self.index, row.copy()))
+            # Only add if not already in missing_rows
+            if not any(idx == self.index for idx, _ in self.missing_rows):
+                self.missing_rows.append((self.index, row.copy()))
             self.index += 1
             self.show_image()
             return
@@ -377,81 +379,88 @@ class AuditApp:
             "Team League Data",
             "Other"
         ]
-        popup = tk.Toplevel(self.root)
-        style = ttk.Style(popup)
-        style.theme_use("arc")
-        popup.configure(bg="#f7f7f7")
-        popup.title("Select the field(s) that are wrong")
-        popup.grab_set()
-        popup.transient(self.root)
-        popup.lift()
-        # Position the popup in the top right corner
-        self.root.update_idletasks()
-        root_x = self.root.winfo_x()
-        root_y = self.root.winfo_y()
-        root_width = self.root.winfo_width()
-        popup_width = 500  # Adjust as needed
-        popup_height = 400 # Adjust as needed
-        x = root_x + root_width - popup_width - 40  # 40px margin from right edge
-        y = root_y + 40  # 40px margin from top edge
-        popup.geometry(f"{popup_width}x{popup_height}+{x}+{y}")
-        popup.focus_force()
-        self.root.unbind('<Left>')
-        self.root.unbind('<Right>')
-        self.root.attributes('-disabled', True)
-
-        main_frame = ttk.Frame(popup, padding=60)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        ttk.Label(main_frame, text="Which field(s) are wrong?").pack(pady=(0, 10), anchor='w')
-        vars = {field: tk.BooleanVar(value=False) for field in fields}
-        if preselected_fields:
-            for field in preselected_fields:
-                if field in vars:
-                    vars[field].set(True)
-        for field in fields:
-            ttk.Checkbutton(main_frame, text=field, variable=vars[field]).pack(anchor='w', pady=2)
-        custom_var = tk.StringVar()
-        entry = ttk.Entry(main_frame, textvariable=custom_var)
-        def on_other_checked(*args):
-            if vars["Other"].get():
-                entry.pack(pady=5, anchor='w')
-            else:
-                entry.pack_forget()
-        vars["Other"].trace_add("write", on_other_checked)
         result = {"value": None, "details": {}}
-        def submit():
-            selected = [field for field in fields if vars[field].get() and field != "Other"]
-            if vars["Other"].get():
-                other_text = custom_var.get().strip()
-                if other_text:
-                    selected.append(other_text)
+
+        def show_popup():
+            popup = tk.Toplevel(self.root)
+            style = ttk.Style(popup)
+            style.theme_use("arc")
+            popup.configure(bg="#f7f7f7")
+            popup.title("Select the field(s) that are wrong")
+            popup.grab_set()
+            popup.transient(self.root)
+            popup.lift()
+            # Position the popup in the top right corner
+            self.root.update_idletasks()
+            root_x = self.root.winfo_x()
+            root_y = self.root.winfo_y()
+            root_width = self.root.winfo_width()
+            popup_width = 500  # Adjust as needed
+            popup_height = 400 # Adjust as needed
+            x = root_x + root_width - popup_width - 40  # 40px margin from right edge
+            y = root_y + 40  # 40px margin from top edge
+            popup.geometry(f"{popup_width}x{popup_height}+{x}+{y}")
+            popup.focus_force()
+            self.root.unbind('<Left>')
+            self.root.unbind('<Right>')
+            self.root.attributes('-disabled', True)
+
+            main_frame = ttk.Frame(popup, padding=60)
+            main_frame.pack(fill=tk.BOTH, expand=True)
+
+            ttk.Label(main_frame, text="Which field(s) are wrong?").pack(pady=(0, 10), anchor='w')
+            vars = {field: tk.BooleanVar(value=False) for field in fields}
+            if preselected_fields:
+                for field in preselected_fields:
+                    if field in vars:
+                        vars[field].set(True)
+            for field in fields:
+                ttk.Checkbutton(main_frame, text=field, variable=vars[field]).pack(anchor='w', pady=2)
+            custom_var = tk.StringVar()
+            entry = ttk.Entry(main_frame, textvariable=custom_var)
+            def on_other_checked(*args):
+                if vars["Other"].get():
+                    entry.pack(pady=5, anchor='w')
                 else:
-                    selected.append("Other")
-            # --- ENFORCE LOGIC HERE ---
-            if "Team League Data" in selected:
-                if "Parent Color Primary" not in selected:
-                    selected.append("Parent Color Primary")
-                if "Logo ID" not in selected:
-                    selected.append("Logo ID")
-            # --------------------------
-            if not selected:
-                messagebox.showwarning("Input required", "Please select at least one field or enter a value for 'Other'.", parent=popup)
-                return
-            popup.destroy()
-            result["value"] = selected
-        # Prevent closing if force_fix is True
-        if force_fix:
-            popup.protocol("WM_DELETE_WINDOW", lambda: None)
-        else:
-            popup.protocol("WM_DELETE_WINDOW", lambda: popup.destroy())
-        ttk.Button(main_frame, text="OK", command=submit).pack(pady=10)
-        popup.bind('<Return>', lambda event: submit())
-        popup.wait_window()
-        self.root.attributes('-disabled', False)
-        self.root.bind('<Left>', self.mark_wrong)
-        self.root.bind('<Right>', self.mark_right)
-        self.root.focus_force()
+                    entry.pack_forget()
+            vars["Other"].trace_add("write", on_other_checked)
+
+            def submit():
+                selected = [field for field in fields if vars[field].get() and field != "Other"]
+                if vars["Other"].get():
+                    other_text = custom_var.get().strip()
+                    if other_text:
+                        selected.append(other_text)
+                    else:
+                        selected.append("Other")
+                # --- ENFORCE LOGIC HERE ---
+                if "Team League Data" in selected:
+                    if "Parent Color Primary" not in selected:
+                        selected.append("Parent Color Primary")
+                    if "Logo ID" not in selected:
+                        selected.append("Logo ID")
+                # --------------------------
+                if not selected or (len(selected) == 1 and selected[0] == "Other"):
+                    messagebox.showwarning("Input required", "Please select at least one field or enter a value for 'Other'.", parent=popup)
+                    return
+                popup.destroy()
+                result["value"] = selected
+
+            # Prevent closing by X button, instead reopen
+            def on_close():
+                popup.destroy()
+                show_popup()
+
+            popup.protocol("WM_DELETE_WINDOW", on_close)
+            ttk.Button(main_frame, text="OK", command=submit).pack(pady=10)
+            popup.bind('<Return>', lambda event: submit())
+            popup.wait_window()
+            self.root.attributes('-disabled', False)
+            self.root.bind('<Left>', self.mark_wrong)
+            self.root.bind('<Right>', self.mark_right)
+            self.root.focus_force()
+
+        show_popup()
 
         # Now, for each selected field, prompt for the new value as needed
         wrong_fields = result["value"]
