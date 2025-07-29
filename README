@@ -1,0 +1,33 @@
+     _____/\/\______/\/\____/\/\__/\/\/\/\/\____/\/\/\/\__/\/\/\/\/\/\_
+    ___/\/\/\/\____/\/\____/\/\__/\/\____/\/\____/\/\________/\/\_____ 
+   _/\/\____/\/\__/\/\____/\/\__/\/\____/\/\____/\/\________/\/\_____  
+  _/\/\/\/\/\/\__/\/\____/\/\__/\/\____/\/\____/\/\________/\/\_____   
+ _/\/\____/\/\____/\/\/\/\____/\/\/\/\/\____/\/\/\/\______/\/\_____    
+__________________________________________________________________   
+
+This tool helps audit product images and metadata for Rally House. It allows users to load a CSV file, view product images, and mark them as correct or incorrect. The tool also provides functionality to fix missing or incorrect data by selecting correct values from predefined lists.
+
+Features
+Load product data from a CSV file.
+Download product images automatically.
+View product images, logos, and color swatches in a fullscreen GUI.
+Mark products as correct (Right Arrow) or incorrect (Left Arrow).
+Fix missing or invalid fields with guided selection popups.
+Undo last action with a Back button.
+Progress bar for image downloads.
+Outputs a cleaned CSV (to_audit.csv) with audit results.
+
+Usage:
+Double click auditorv2.exe
+Select choose file and select the csv report you were emailed that contains the products to audit
+-Left Arrow: Mark product as incorrect and specify which fields are wrong.
+-Right Arrow: Mark product as correct.
+-Back Button: Undo last action.
+Output: 
+Results are saved to to_audit.csv in the same folder. Import this at: https://3847979.app.netsuite.com/app/setup/assistants/nsimport/importassistant.nl?recid=1856&new=T
+
+Repository
+github.com/elitetaco111/audit-tool
+
+Developed by Dave Nissly
+For questions or issues, please open an issue on GitHub.
