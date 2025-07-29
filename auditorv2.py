@@ -186,7 +186,7 @@ class AuditApp:
                     self.root.attributes('-disabled', True)
                     frame = ttk.Frame(popup, padding=40)
                     frame.pack(fill=tk.BOTH, expand=True)
-                    ttk.Label(frame, text="You are about to audit products with missing fields.\nYou must fix these products and the missing field will be autoselected for you.", font=(self.canvas_font)).pack(pady=20)
+                    ttk.Label(frame, text="You are about to audit products with missing fields.\nYou must fix these products; the missing field will be autoselected for you.", font=(self.canvas_font)).pack(pady=20)
                     def on_ok():
                         popup.destroy()
                     ttk.Button(frame, text="OK", command=on_ok).pack(pady=10)
@@ -224,8 +224,12 @@ class AuditApp:
             not color_id or
             not team_league
         ):
-            # Only add if not already in missing_rows
-            if not any(idx == self.index for idx, _ in self.missing_rows):
+            # Only add if not already in missing_rows AND not already fixed in choices
+            already_fixed = any(
+                entry[1].name == self.index and entry[0] in ('accepted', 'to_audit')
+                for entry in self.choices
+            )
+            if not any(idx == self.index for idx, _ in self.missing_rows) and not already_fixed:
                 self.missing_rows.append((self.index, row.copy()))
             self.index += 1
             self.show_image()
@@ -622,10 +626,12 @@ class AuditApp:
         # Undo the last user action (not auto-rejected)
         for i in range(len(self.choices) - 1, -1, -1):
             entry = self.choices[i]
-            status, row, auto_rejected = entry[:3]  # Only take the first three values
+            status, row, auto_rejected = entry[:3]
             if not auto_rejected:
                 self.choices.pop(i)
-                self.index = row.name  # row.name is the original index in DataFrame
+                self.index = row.name
+                # Remove from missing_rows if present
+                self.missing_rows = [(idx, r) for idx, r in self.missing_rows if idx != self.index]
                 self.show_image()
                 return
         # If nothing to undo, do nothing
