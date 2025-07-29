@@ -9,6 +9,7 @@ import download_helper
 import csv
 from ttkthemes import ThemedTk
 import threading
+import datetime
 
 """
 Developed by Dave Nissly
@@ -646,7 +647,10 @@ class AuditApp:
             return
         # Save the corrected DataFrame (excluding Picture ID and Image Assignment)
         exclude_cols = {"Picture ID", "Image Assignment"}
-        output_df = self.data[[col for col in self.data.columns if col not in exclude_cols]]
+        output_df = self.data[[col for col in self.data.columns if col not in exclude_cols]].copy()
+        # Add Flash Sale Date column with today's date
+        today_str = datetime.datetime.now().strftime("%m/%d/%Y")
+        output_df["Flash Sale Date"] = today_str
         output_df.to_csv("to_audit.csv", index=False)
         # Delete the entire TEMP folder
         if os.path.exists(TEMP_FOLDER):
