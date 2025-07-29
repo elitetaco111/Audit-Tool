@@ -213,12 +213,16 @@ class AuditApp:
         team_league = row['Team League Data'] if pd.notna(row['Team League Data']) else ""
 
         # Track missing info rows, but show them normally
-        if (
+        logo_id_missing = (
             not logo_id or
+            "-tbd" in logo_id.lower() or
+            logo_id.strip() == "- None -"
+        )
+        if (
+            logo_id_missing or
             not class_mapping or
             not color_id or
-            not team_league or
-            "-tbd" in logo_id.lower()
+            not team_league
         ):
             # Only add if not already in missing_rows
             if not any(idx == self.index for idx, _ in self.missing_rows):
