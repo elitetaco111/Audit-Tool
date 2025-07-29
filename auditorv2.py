@@ -10,6 +10,7 @@ import csv
 from ttkthemes import ThemedTk
 import threading
 import datetime
+import tempfile
 
 """
 Developed by Dave Nissly
@@ -125,20 +126,37 @@ class AuditApp:
         self.progress_bar.update_idletasks()
 
         self.data = pd.read_csv(file_path, dtype=str)
+
+        # --- Preprocess: Separate parent and child records ---
+        self.child_records = {}  # {parent_name: [child_rows]}
+        parent_rows = []
+        for idx, row in self.data.iterrows():
+            name = str(row['Name']) if 'Name' in row else ""
+            if " :" in name:
+                parent_name = name.split(" :")[0]
+                self.child_records.setdefault(parent_name, []).append(row.copy())
+            else:
+                parent_rows.append(row.copy())
+        self.data = pd.DataFrame(parent_rows).reset_index(drop=True)
         total_images = len(self.data)
 
-        # Start download in a background thread
+        # --- Create a temporary CSV for parent records only ---
+        self.temp_parent_csv = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
+        self.data.to_csv(self.temp_parent_csv.name, index=False)
+        self.temp_parent_csv.close()
+
+        # Start download in a background thread (using parent-only CSV)
         threading.Thread(
             target=self.download_images_thread,
-            args=(file_path, TEMP_FOLDER),
+            args=(self.temp_parent_csv.name, TEMP_FOLDER),
             daemon=True
         ).start()
 
         # Start polling for progress in the main thread
         self.poll_progress(total_images)
 
-    def download_images_thread(self, file_path, temp_folder):
-        download_helper.download_images(file_path, temp_folder, item_col='Name', picture_id_col='Picture ID')
+    def download_images_thread(self, parent_csv_path, temp_folder):
+        download_helper.download_images(parent_csv_path, temp_folder, item_col='Name', picture_id_col='Picture ID')
 
     def poll_progress(self, total_images):
         downloaded = len([f for f in os.listdir(TEMP_FOLDER) if f.lower().endswith('.jpg') or f.lower().endswith('.png')])
@@ -645,10 +663,19 @@ class AuditApp:
     def save_outputs(self):
         if self.data is None or self.data.empty:
             return
-        # Save the corrected DataFrame (excluding Picture ID and Image Assignment)
         exclude_cols = {"Picture ID", "Image Assignment"}
-        output_df = self.data[[col for col in self.data.columns if col not in exclude_cols]].copy()
-        # Add Flash Sale Date column with today's date
+        output_rows = []
+        for _, parent_row in self.data.iterrows():
+            output_rows.append(parent_row.copy())
+            parent_name = str(parent_row['Name']) if 'Name' in parent_row else ""
+            if hasattr(self, 'child_records') and parent_name in self.child_records:
+                for child_row in self.child_records[parent_name]:
+                    # Copy all parent values to child, except Name
+                    new_child = parent_row.copy()
+                    new_child['Name'] = child_row['Name']
+                    output_rows.append(new_child)
+        output_df = pd.DataFrame(output_rows)
+        output_df = output_df[[col for col in output_df.columns if col not in exclude_cols]].copy()
         today_str = datetime.datetime.now().strftime("%m/%d/%Y")
         output_df["Flash Sale Date"] = today_str
         output_df.to_csv("to_audit.csv", index=False)
