@@ -11,6 +11,9 @@ TEMP_FOLDER = "TEMP"
 LOGOS_FOLDER = "Logos"
 COLORS_FOLDER = "Colors"
 
+# DEPRECATED USE auditorv2.py now
+# This script is a GUI application for auditing product images and metadata.
+
 def resource_path(relative_path):
     """
     Get absolute path to resource, works for dev and for PyInstaller.
