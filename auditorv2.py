@@ -424,6 +424,17 @@ class AuditApp:
         # include a 'back' flag
         result = {"value": None, "details": {}, "back": False}
 
+        # Style number to expose in popups
+        style_number = row['Name'] if pd.notna(row['Name']) else ""
+
+        def copy_to_clip(text):
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(text)
+                # Optional: brief visual feedback can be added here if wanted
+            except Exception:
+                pass
+
         def show_popup():
             popup = tk.Toplevel(self.root)
             style = ttk.Style(popup)
@@ -439,9 +450,9 @@ class AuditApp:
             root_y = self.root.winfo_rooty()
             root_width = self.root.winfo_width()
             popup_width = 500  # Adjust as needed
-            popup_height = 400 # Adjust as needed
-            x = root_x + root_width - popup_width - 40  # 40px margin from right edge
-            y = root_y + 40  # 40px margin from top edge
+            popup_height = 420 # Adjust as needed
+            x = root_x + root_width - popup_width - 40
+            y = root_y + 40
             popup.geometry(f"{popup_width}x{popup_height}+{x}+{y}")
             popup.focus_force()
             self.root.unbind('<Left>')
@@ -450,6 +461,16 @@ class AuditApp:
 
             main_frame = ttk.Frame(popup, padding=60)
             main_frame.pack(fill=tk.BOTH, expand=True)
+
+            # NEW: Style Number copy bar (double-click to copy)
+            copy_bar = ttk.Frame(main_frame)
+            copy_bar.pack(fill=tk.X, pady=(0, 12))
+            ttk.Label(copy_bar, text="Style Number:").pack(side=tk.LEFT)
+            sn_var = tk.StringVar(value=style_number)
+            sn_entry = ttk.Entry(copy_bar, textvariable=sn_var, state='readonly', width=32)
+            sn_entry.pack(side=tk.LEFT, padx=(6, 6))
+            sn_entry.bind('<Double-Button-1>', lambda e: copy_to_clip(sn_var.get()))
+            ttk.Button(copy_bar, text="Copy", command=lambda: copy_to_clip(sn_var.get())).pack(side=tk.LEFT)
 
             ttk.Label(main_frame, text="Which field(s) are wrong?").pack(pady=(0, 10), anchor='w')
             vars = {field: tk.BooleanVar(value=False) for field in fields}
@@ -517,14 +538,12 @@ class AuditApp:
 
         show_popup()
 
-        # If user pressed Back, signal caller (fix_missing_loop) to go to previous product
         if result.get("back"):
             return {"back": True}
 
-        # Now, for each selected field, prompt for the new value as needed
         wrong_fields = result["value"]
         wrong_details = {}
-        # Helper to select from a list
+
         def select_from_list(title, label, options, show_images=False, image_folder=None):
             sel_popup = tk.Toplevel(self.root)
             style = ttk.Style(sel_popup)
@@ -537,6 +556,17 @@ class AuditApp:
 
             main_frame = ttk.Frame(sel_popup, padding=20)
             main_frame.pack(fill=tk.BOTH, expand=True)
+
+            # NEW: Style Number copy bar in selector popups too
+            copy_bar = ttk.Frame(main_frame)
+            copy_bar.pack(fill=tk.X, pady=(0, 8))
+            ttk.Label(copy_bar, text="Style Number:").pack(side=tk.LEFT)
+            sn_entry = ttk.Entry(copy_bar, width=32)
+            sn_entry.insert(0, style_number)
+            sn_entry.config(state='readonly')
+            sn_entry.pack(side=tk.LEFT, padx=(6, 6))
+            sn_entry.bind('<Double-Button-1>', lambda e: copy_to_clip(style_number))
+            ttk.Button(copy_bar, text="Copy", command=lambda: copy_to_clip(style_number)).pack(side=tk.LEFT)
 
             ttk.Label(main_frame, text=label).pack(pady=(0, 10), anchor='w')
             search_var = tk.StringVar()
@@ -558,7 +588,6 @@ class AuditApp:
                 borderwidth=0
             )
             listbox.pack(side=tk.LEFT, pady=10, fill=tk.Y)
-            # listbox.focus_set()  # enable this if you want the listbox to be focused initially
 
             image_label = None
             img_cache = {}
@@ -599,6 +628,7 @@ class AuditApp:
                 if sel:
                     local["value"] = filtered_options[sel[0]]
                     sel_popup.destroy()
+
             btn_frame = ttk.Frame(main_frame)
             btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
             ttk.Button(btn_frame, text="OK", command=on_select).pack()
@@ -628,10 +658,8 @@ class AuditApp:
             new_team = select_from_list("Select Team", "Select the correct Team League Data:", team_options)
             if new_team:
                 wrong_details["Team League Data"] = new_team
-                # Update row for filtering other fields
                 row = row.copy()
                 row['Team League Data'] = new_team
-        team_val = row['Team League Data'] if pd.notna(row['Team League Data']) else ""
         if "Logo ID" in wrong_fields:
             logo_options = load_csv_column("LogoList.csv", "Logo ID", filter_col="Team League Data", filter_val=row['Team League Data'])
             new_logo = select_from_list(
