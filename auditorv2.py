@@ -21,7 +21,7 @@ It also provides functionality to handle missing or incorrect data by allowing u
 
 github.com/elitetaco111/audit-tool
 
-To Package: pyinstaller --onefile --noconsole --hidden-import=tkinter --add-data "ColorList.csv;." --add-data "LogoList.csv;." --add-data "TeamList.csv;." --add-data "ClassMappingList.csv;." --add-data "choose.png;." --add-data "back.png;." --add-data "background.png;." --add-data "Logos;Logos" --add-data "Colors;Colors" auditor.py
+To Package: pyinstaller --onefile --noconsole --hidden-import=tkinter --add-data "ColorList.csv;." --add-data "LogoList.csv;." --add-data "TeamList.csv;." --add-data "ClassMappingList.csv;." --add-data "choose.png;." --add-data "back.png;." --add-data "background.png;." --add-data "Logos;Logos" --add-data "Colors;Colors" auditorv2.py
 """
 
 TEMP_FOLDER = "TEMP"
@@ -65,6 +65,7 @@ class AuditApp:
         self.missing_rows = []
         self.missing_index = 0
         self.data_missing = None
+        self.in_missing_loop = False
         self.setup_ui()
         self.root.bind('<Left>', self.mark_wrong)
         self.root.bind('<Right>', self.mark_right)
@@ -220,6 +221,7 @@ class AuditApp:
                 indices, rows = zip(*self.missing_rows)
                 self.data_missing = pd.DataFrame(list(rows), index=list(indices)).astype('object')
                 self.missing_index = 0
+                self.in_missing_loop = True  # NEW: start missing-loop mode
                 self.fix_missing_loop()
                 return
             self.finish()
@@ -336,6 +338,7 @@ class AuditApp:
 
     def fix_missing_loop(self):
         if self.missing_index >= len(self.data_missing):
+            self.in_missing_loop = False  # NEW: exit missing-loop mode
             self.finish()
             return
         row = self.data_missing.iloc[self.missing_index]
@@ -352,10 +355,22 @@ class AuditApp:
         #add more checks if needed here
 
         self.display_row(row)
-        self.btn_back.place_forget()
+        # self.btn_back.place_forget()  # REMOVE: keep Back visible during missing-loop
+
         self._popup_open = True
         wrong_info = self.ask_wrong_fields(row, preselected_fields=missing_fields)
         self._popup_open = False
+
+        # NEW: allow "Back" from popup to go to previous missing product
+        if isinstance(wrong_info, dict) and wrong_info.get("back"):
+            if self.missing_index > 0:
+                self.missing_index -= 1
+            # Optional: remove any previous choice for this row to avoid duplicates
+            target_idx = self.data_missing.iloc[self.missing_index].name
+            self.choices = [c for c in self.choices if getattr(c[1], "name", None) != target_idx]
+            self.fix_missing_loop()
+            return
+
         wrong_fields = wrong_info["fields"] if isinstance(wrong_info, dict) else []
         wrong_details = wrong_info["details"] if isinstance(wrong_info, dict) else {}
         if not wrong_fields or (isinstance(wrong_fields, list) and all(f.strip() == "" for f in wrong_fields)):
@@ -406,7 +421,8 @@ class AuditApp:
             "Team League Data",
             "Other"
         ]
-        result = {"value": None, "details": {}}
+        # include a 'back' flag
+        result = {"value": None, "details": {}, "back": False}
 
         def show_popup():
             popup = tk.Toplevel(self.root)
@@ -419,8 +435,8 @@ class AuditApp:
             popup.lift()
             # Position the popup in the top right corner
             self.root.update_idletasks()
-            root_x = self.root.winfo_x()
-            root_y = self.root.winfo_y()
+            root_x = self.root.winfo_rootx()
+            root_y = self.root.winfo_rooty()
             root_width = self.root.winfo_width()
             popup_width = 500  # Adjust as needed
             popup_height = 400 # Adjust as needed
@@ -443,8 +459,10 @@ class AuditApp:
                         vars[field].set(True)
             for field in fields:
                 ttk.Checkbutton(main_frame, text=field, variable=vars[field]).pack(anchor='w', pady=2)
+
             custom_var = tk.StringVar()
             entry = ttk.Entry(main_frame, textvariable=custom_var)
+
             def on_other_checked(*args):
                 if vars["Other"].get():
                     entry.pack(pady=5, anchor='w')
@@ -466,20 +484,30 @@ class AuditApp:
                         selected.append("Parent Color Primary")
                     if "Logo ID" not in selected:
                         selected.append("Logo ID")
-                # --------------------------
                 if not selected or (len(selected) == 1 and selected[0] == "Other"):
                     messagebox.showwarning("Input required", "Please select at least one field or enter a value for 'Other'.", parent=popup)
                     return
-                popup.destroy()
                 result["value"] = selected
+                popup.destroy()
 
-            # Prevent closing by X button, instead reopen
+            def go_back():
+                result["back"] = True
+                popup.destroy()
+
+            # prevent closing by X: reopen the dialog
             def on_close():
                 popup.destroy()
                 show_popup()
 
             popup.protocol("WM_DELETE_WINDOW", on_close)
-            ttk.Button(main_frame, text="OK", command=submit).pack(pady=10)
+
+            # Buttons: show Back only during the missing loop
+            btn_bar = ttk.Frame(main_frame)
+            btn_bar.pack(pady=10, anchor='e', fill=tk.X)
+            if getattr(self, "in_missing_loop", False):
+                ttk.Button(btn_bar, text="Back", command=go_back).pack(side=tk.LEFT)
+            ttk.Button(btn_bar, text="OK", command=submit).pack(side=tk.RIGHT)
+
             popup.bind('<Return>', lambda event: submit())
             popup.wait_window()
             self.root.attributes('-disabled', False)
@@ -489,10 +517,13 @@ class AuditApp:
 
         show_popup()
 
+        # If user pressed Back, signal caller (fix_missing_loop) to go to previous product
+        if result.get("back"):
+            return {"back": True}
+
         # Now, for each selected field, prompt for the new value as needed
         wrong_fields = result["value"]
         wrong_details = {}
-
         # Helper to select from a list
         def select_from_list(title, label, options, show_images=False, image_folder=None):
             sel_popup = tk.Toplevel(self.root)
@@ -511,7 +542,7 @@ class AuditApp:
             search_var = tk.StringVar()
             search_entry = ttk.Entry(main_frame, textvariable=search_var, width=60)
             search_entry.pack(pady=(0, 10), anchor='w')
-            search_entry.focus_set()  # enable this if you want the search entry to be focused initially
+            search_entry.focus_set()
 
             filtered_options = options.copy()
             listbox_var = tk.StringVar(value=filtered_options)
@@ -552,8 +583,8 @@ class AuditApp:
                 listbox.bind("<<ListboxSelect>>", show_logo_img)
 
             def filter_options(*args):
-                search = search_var.get().lower()
                 nonlocal filtered_options
+                search = search_var.get().lower()
                 filtered_options = [opt for opt in options if search in opt.lower()]
                 listbox_var.set(filtered_options)
                 if filtered_options:
@@ -562,11 +593,11 @@ class AuditApp:
                     show_logo_img(None)
             search_var.trace_add("write", filter_options)
 
-            result = {"value": None}
+            local = {"value": None}
             def on_select(event=None):
                 sel = listbox.curselection()
                 if sel:
-                    result["value"] = filtered_options[sel[0]]
+                    local["value"] = filtered_options[sel[0]]
                     sel_popup.destroy()
             btn_frame = ttk.Frame(main_frame)
             btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
@@ -575,9 +606,9 @@ class AuditApp:
             sel_popup.wait_window()
             self.root.attributes('-disabled', False)
             self.root.focus_force()
-            return result["value"]
+            return local["value"]
 
-        # Load CSVs as needed
+        # CSV loaders
         def load_csv_column(filename, colname, filter_col=None, filter_val=None):
             path = resource_path(filename)
             values = []
@@ -585,10 +616,10 @@ class AuditApp:
                 return values
             with open(path, newline='', encoding='utf-8') as csvfile:
                 reader = csv.DictReader(csvfile)
-                for row in reader:
-                    if filter_col and filter_val and row.get(filter_col) != filter_val:
+                for r in reader:
+                    if filter_col and filter_val and r.get(filter_col) != filter_val:
                         continue
-                    values.append(row[colname])
+                    values.append(r[colname])
             return sorted(set(values))
 
         # Always handle Team League Data first if selected
@@ -623,7 +654,6 @@ class AuditApp:
             if new_class:
                 wrong_details["Class Mapping"] = new_class
 
-        # Return both the wrong fields and the new values chosen
         return {"fields": wrong_fields, "details": wrong_details}
 
     def download_images_with_progress(self, file_path, temp_folder, total_images):
@@ -642,6 +672,13 @@ class AuditApp:
             self.root.after(10)  # Wait a bit before checking again
 
     def undo_last(self):
+        # If we are fixing missing rows, go back within that list
+        if getattr(self, "in_missing_loop", False) and not getattr(self, "_popup_open", False):
+            if self.missing_index > 0:
+                self.missing_index -= 1
+            self.fix_missing_loop()
+            return
+
         # Undo the last user action (not auto-rejected)
         for i in range(len(self.choices) - 1, -1, -1):
             entry = self.choices[i]
@@ -649,7 +686,6 @@ class AuditApp:
             if not auto_rejected:
                 self.choices.pop(i)
                 self.index = row.name
-                # Remove from missing_rows if present
                 self.missing_rows = [(idx, r) for idx, r in self.missing_rows if idx != self.index]
                 self.show_image()
                 return
