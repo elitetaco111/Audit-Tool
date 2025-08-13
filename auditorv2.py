@@ -24,6 +24,13 @@ github.com/elitetaco111/audit-tool
 To Package: pyinstaller --onefile --noconsole --hidden-import=tkinter --add-data "ColorList.csv;." --add-data "LogoList.csv;." --add-data "TeamList.csv;." --add-data "ClassMappingList.csv;." --add-data "choose.png;." --add-data "back.png;." --add-data "background.png;." --add-data "Logos;Logos" --add-data "Colors;Colors" auditorv2.py
 """
 
+#Add total count of product
+#Save and quit/resume logic
+#Other needs to work
+#image is wrong option + seperate csv for that
+#fix long class display
+#add display name, silhouette, webstyle
+
 TEMP_FOLDER = "TEMP"
 LOGOS_FOLDER = "Logos"
 COLORS_FOLDER = "Colors"
@@ -737,6 +744,7 @@ class AuditApp:
                     # Copy all parent values to child, except Name
                     new_child = parent_row.copy()
                     new_child['Name'] = child_row['Name']
+                    new_child['Internal ID'] = child_row['Internal ID0']
                     output_rows.append(new_child)
         output_df = pd.DataFrame(output_rows)
         output_df = output_df[[col for col in output_df.columns if col not in exclude_cols]].copy()
