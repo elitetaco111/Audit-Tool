@@ -24,12 +24,14 @@ github.com/elitetaco111/audit-tool
 To Package: pyinstaller --onefile --noconsole --hidden-import=tkinter --add-data "ColorList.csv;." --add-data "LogoList.csv;." --add-data "TeamList.csv;." --add-data "ClassMappingList.csv;." --add-data "choose.png;." --add-data "back.png;." --add-data "background.png;." --add-data "Logos;Logos" --add-data "Colors;Colors" auditorv2.py
 """
 
+# TODO
 #Add total count of product
 #Save and quit/resume logic
 #Other needs to work
-#image is wrong option + seperate csv for that
+#image is wrong option + separate csv for that
 #fix long class display
-#add display name, silhouette, webstyle
+
+# TESTING
 
 TEMP_FOLDER = "TEMP"
 LOGOS_FOLDER = "Logos"
@@ -107,7 +109,7 @@ class AuditApp:
 
         self.canvas = tk.Canvas(self.frame, width=1920, height=1080, bg="white")
         self.canvas.pack(fill=tk.BOTH, expand=True)
-        self.canvas_font = ("Roboto", 24)
+        self.canvas_font = ("Roboto", 18)
 
         # Add back button (hidden until images are shown)
         back_img_path = resource_path("back.png")
@@ -271,6 +273,9 @@ class AuditApp:
         class_mapping = row['Class Mapping'] if pd.notna(row['Class Mapping']) else ""
         color_id = row['Parent Color Primary'] if pd.notna(row['Parent Color Primary']) else ""
         team_league = row['Team League Data'] if pd.notna(row['Team League Data']) else ""
+        display_name = row['Display Name'] if pd.notna(row['Display Name']) else ""
+        silhouette = row['Silhouette'] if pd.notna(row['Silhouette']) else ""
+        web_style = row['Web Style'] if pd.notna(row['Web Style']) else ""
         img_path = os.path.join(TEMP_FOLDER, f"{row['Name']}.jpg")
         logo_path = find_image(LOGOS_FOLDER, logo_id)
         color_path = find_image(COLORS_FOLDER, color_id)
@@ -304,9 +309,9 @@ class AuditApp:
         )
 
         # Info boxes, at least 50px to the right of the product image
-        x_offset = 511 + 50
+        x_offset = 511 + 25
         y_offset = 10
-        box_height = 90
+        box_height = 70
 
         # Logo ID
         self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Logo ID: {logo_id}", font=self.canvas_font)
@@ -318,7 +323,7 @@ class AuditApp:
 
         # Class Mapping
         self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Class Mapping: {class_mapping}", font=self.canvas_font)
-        y_offset += box_height
+        y_offset += 35
 
         # Parent Color Primary
         self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Parent Color Primary: {color_id}", font=self.canvas_font)
@@ -327,8 +332,21 @@ class AuditApp:
             self.tk_color = ImageTk.PhotoImage(color_img)
             self.canvas.create_image(x_offset+100, y_offset+40, anchor='nw', image=self.tk_color)
         y_offset += box_height + 180
+        # Team League Data
         self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Team League Data: {team_league}", font=self.canvas_font)
-        y_offset += box_height
+        y_offset += 35
+
+        # Display Name
+        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Display Name: {display_name}", font=self.canvas_font)
+        y_offset += 35
+
+        # Silhouette Name
+        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Silhouette: {silhouette}", font=self.canvas_font)
+        y_offset += 35
+
+        # Web Style Name
+        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Web Style: {web_style}", font=self.canvas_font)
+        y_offset += 35
 
         # Add Style Number label on canvas
         self.canvas.create_text(x_offset, y_offset, anchor='nw', text="Style Number:", font=self.canvas_font)
@@ -341,7 +359,7 @@ class AuditApp:
         self.style_entry.insert(0, style_number)
         self.style_entry.config(state='readonly')
         # Place the entry box just to the right of the label
-        self.style_entry.place(x=x_offset + 220, y=y_offset)
+        self.style_entry.place(x=x_offset + 200, y=y_offset)
 
     def fix_missing_loop(self):
         if self.missing_index >= len(self.data_missing):
@@ -741,10 +759,18 @@ class AuditApp:
             parent_name = str(parent_row['Name']) if 'Name' in parent_row else ""
             if hasattr(self, 'child_records') and parent_name in self.child_records:
                 for child_row in self.child_records[parent_name]:
-                    # Copy all parent values to child, except Name
+                    # Copy all parent values to child, except Name and Internal ID
                     new_child = parent_row.copy()
                     new_child['Name'] = child_row['Name']
-                    new_child['Internal ID'] = child_row['Internal ID0']
+
+                    # Safely map child's Internal ID to the output
+                    internal_id = None
+                    for key in ('Internal ID', 'Internal ID.1', 'Internal ID 0', 'InternalID0', 'InternalID', 'Internal ID0'):
+                        if key in child_row and pd.notna(child_row[key]):
+                            internal_id = child_row[key]
+                            break
+                    new_child['Internal ID'] = internal_id if internal_id is not None else ""
+
                     output_rows.append(new_child)
         output_df = pd.DataFrame(output_rows)
         output_df = output_df[[col for col in output_df.columns if col not in exclude_cols]].copy()
