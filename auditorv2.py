@@ -79,6 +79,7 @@ class AuditApp:
         self.root.bind('<Left>', self.mark_wrong)
         self.root.bind('<Right>', self.mark_right)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)  # Handle window close
+        self.progress_label = None
 
     def setup_ui(self):
         self.frame = tk.Frame(self.root)
@@ -361,9 +362,22 @@ class AuditApp:
         # Place the entry box just to the right of the label
         self.style_entry.place(x=x_offset + 200, y=y_offset)
 
+        # progress counter to the right of the Style Number entry
+        audited = self._audited_count()
+        total = len(self.data) if self.data is not None else 0
+        progress_text = f"Audited: {audited} / {total}"
+        if not self.progress_label or not self.progress_label.winfo_exists():
+            self.progress_label = ttk.Label(self.frame, text=progress_text, font=self.canvas_font)
+        else:
+            self.progress_label.config(text=progress_text)
+        # Position to the right of the entry
+        self.frame.update_idletasks()
+        entry_width_px = self.style_entry.winfo_width()
+        self.progress_label.place(x=(x_offset + 200 + entry_width_px + 20), y=y_offset)
+
     def fix_missing_loop(self):
         if self.missing_index >= len(self.data_missing):
-            self.in_missing_loop = False  # NEW: exit missing-loop mode
+            self.in_missing_loop = False  # exit missing-loop mode
             self.finish()
             return
         row = self.data_missing.iloc[self.missing_index]
@@ -787,6 +801,13 @@ class AuditApp:
     def on_close(self):
         self.save_outputs()
         self.root.destroy()
+
+    # NEW: helper to count audited parent products (unique parent indices)
+    def _audited_count(self):
+        try:
+            return len({getattr(c[1], "name", None) for c in self.choices if len(c) >= 3 and not c[2]})
+        except Exception:
+            return len([c for c in self.choices if len(c) >= 3 and not c[2]])
 
 if __name__ == "__main__":
     root = ThemedTk(theme="arc")
