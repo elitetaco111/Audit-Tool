@@ -25,13 +25,9 @@ To Package: pyinstaller --onefile --noconsole --hidden-import=tkinter --add-data
 """
 
 # TODO
-#Add total count of product
 #Save and quit/resume logic
 #Other needs to work
 #image is wrong option + separate csv for that
-#fix long class display
-
-# TESTING
 
 TEMP_FOLDER = "TEMP"
 LOGOS_FOLDER = "Logos"
@@ -80,6 +76,7 @@ class AuditApp:
         self.root.bind('<Right>', self.mark_right)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)  # Handle window close
         self.progress_label = None
+        self._app_quitting = False
 
     def setup_ui(self):
         self.frame = tk.Frame(self.root)
@@ -207,26 +204,21 @@ class AuditApp:
                 def show_missing_warning():
                     popup = tk.Toplevel(self.root)
                     popup.title("Missing Fields Detected")
-                    popup.grab_set()
                     popup.transient(self.root)
                     popup.lift()
-                    popup.focus_force()
-                    self.root.unbind('<Left>')
-                    self.root.unbind('<Right>')
-                    self.root.attributes('-disabled', True)
                     frame = ttk.Frame(popup, padding=40)
                     frame.pack(fill=tk.BOTH, expand=True)
                     ttk.Label(frame, text="You are about to audit products with missing fields.\nYou must fix these products; the missing field will be autoselected for you.", font=(self.canvas_font)).pack(pady=20)
                     def on_ok():
                         popup.destroy()
                     ttk.Button(frame, text="OK", command=on_ok).pack(pady=10)
-                    popup.protocol("WM_DELETE_WINDOW", lambda: None)  # Prevent closing
+                    popup.protocol("WM_DELETE_WINDOW", self.quit_app)  # Close app if X is clicked
                     popup.wait_window()
-                    self.root.attributes('-disabled', False)
-                    self.root.bind('<Left>', self.mark_wrong)
-                    self.root.bind('<Right>', self.mark_right)
-                    self.root.focus_force()
+                    if getattr(self, "_app_quitting", False):
+                        return
                 show_missing_warning()
+                if getattr(self, "_app_quitting", False):
+                    return
                 # -------------------------------------------------
                 indices, rows = zip(*self.missing_rows)
                 self.data_missing = pd.DataFrame(list(rows), index=list(indices)).astype('object')
@@ -480,7 +472,6 @@ class AuditApp:
             style.theme_use("arc")
             popup.configure(bg="#f7f7f7")
             popup.title("Select the field(s) that are wrong")
-            popup.grab_set()
             popup.transient(self.root)
             popup.lift()
             # Position the popup in the top right corner
@@ -488,15 +479,12 @@ class AuditApp:
             root_x = self.root.winfo_rootx()
             root_y = self.root.winfo_rooty()
             root_width = self.root.winfo_width()
-            popup_width = 500  # Adjust as needed
-            popup_height = 420 # Adjust as needed
+            popup_width = 500
+            popup_height = 420
             x = root_x + root_width - popup_width - 40
             y = root_y + 40
             popup.geometry(f"{popup_width}x{popup_height}+{x}+{y}")
             popup.focus_force()
-            self.root.unbind('<Left>')
-            self.root.unbind('<Right>')
-            self.root.attributes('-disabled', True)
 
             main_frame = ttk.Frame(popup, padding=60)
             main_frame.pack(fill=tk.BOTH, expand=True)
@@ -554,12 +542,8 @@ class AuditApp:
                 result["back"] = True
                 popup.destroy()
 
-            # prevent closing by X: reopen the dialog
-            def on_close():
-                popup.destroy()
-                show_popup()
-
-            popup.protocol("WM_DELETE_WINDOW", on_close)
+            # If user clicks X, quit the whole app
+            popup.protocol("WM_DELETE_WINDOW", self.quit_app)
 
             # Buttons: show Back only during the missing loop
             btn_bar = ttk.Frame(main_frame)
@@ -570,12 +554,10 @@ class AuditApp:
 
             popup.bind('<Return>', lambda event: submit())
             popup.wait_window()
-            self.root.attributes('-disabled', False)
-            self.root.bind('<Left>', self.mark_wrong)
-            self.root.bind('<Right>', self.mark_right)
-            self.root.focus_force()
 
         show_popup()
+        if getattr(self, "_app_quitting", False):
+            return {"fields": [], "details": {}}
 
         if result.get("back"):
             return {"back": True}
@@ -589,9 +571,7 @@ class AuditApp:
             style.theme_use("arc")
             sel_popup.configure(bg="#f7f7f7")
             sel_popup.title(title)
-            sel_popup.grab_set()
             sel_popup.focus_force()
-            self.root.attributes('-disabled', True)
 
             main_frame = ttk.Frame(sel_popup, padding=20)
             main_frame.pack(fill=tk.BOTH, expand=True)
@@ -671,10 +651,14 @@ class AuditApp:
             btn_frame = ttk.Frame(main_frame)
             btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
             ttk.Button(btn_frame, text="OK", command=on_select).pack()
+
+            # If user clicks X, quit the whole app
+            sel_popup.protocol("WM_DELETE_WINDOW", self.quit_app)
+
             sel_popup.bind('<Return>', on_select)
             sel_popup.wait_window()
-            self.root.attributes('-disabled', False)
-            self.root.focus_force()
+            if getattr(self, "_app_quitting", False):
+                return None
             return local["value"]
 
         # CSV loaders
@@ -808,6 +792,19 @@ class AuditApp:
             return len({getattr(c[1], "name", None) for c in self.choices if len(c) >= 3 and not c[2]})
         except Exception:
             return len([c for c in self.choices if len(c) >= 3 and not c[2]])
+
+    def quit_app(self):
+        # Gracefully save and close everything
+        if getattr(self, "_app_quitting", False):
+            return
+        self._app_quitting = True
+        try:
+            self.on_close()
+        except Exception:
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     root = ThemedTk(theme="arc")
