@@ -11,6 +11,7 @@ from ttkthemes import ThemedTk
 import threading
 import datetime
 import tempfile
+import json  # <-- added
 
 """
 Developed by Dave Nissly
@@ -77,6 +78,67 @@ class AuditApp:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)  # Handle window close
         self.progress_label = None
         self._app_quitting = False
+        # ---- session/resume additions ----
+        self.original_csv_path = None
+        self.session_manifest_path = None
+        self.session_data_csv_path = None
+        self.temp_folder = TEMP_FOLDER  # per-session subfolder will override this
+        self.completed = False
+
+    # Helper: place a popup on the same screen as the root
+    def _place_popup(self, popup, width, height, align="center", margin=40):
+        try:
+            self.root.update_idletasks()
+            rx = self.root.winfo_rootx()
+            ry = self.root.winfo_rooty()
+            rw = self.root.winfo_width()
+            rh = self.root.winfo_height()
+            if align == "top-right":
+                x = rx + max(0, rw - width - margin)
+                y = ry + margin
+            elif align == "top-center":
+                x = rx + (rw - width) // 2
+                y = ry + margin
+            else:  # center
+                x = rx + (rw - width) // 2
+                y = ry + (rh - height) // 2
+            popup.geometry(f"{int(width)}x{int(height)}+{int(x)}+{int(y)}")
+        except Exception:
+            # Fallback: just center on default screen
+            popup.geometry(f"{int(width)}x{int(height)}")
+
+    # NEW: unified missing-field detection (honors '-TBD' as missing for Logo ID)
+    def _get_missing_fields(self, row):
+        fields = []
+        def _val(key):
+            v = row.get(key) if hasattr(row, "get") else row[key]
+            return v if pd.notna(v) else ""
+        logo_val = str(_val("Logo ID")).strip()
+        if (not logo_val) or logo_val.lower() == "- none -" or "-tbd" in logo_val.lower():
+            fields.append("Logo ID")
+        if not str(_val("Class Mapping")).strip():
+            fields.append("Class Mapping")
+        if not str(_val("Parent Color Primary")).strip():
+            fields.append("Parent Color Primary")
+        if not str(_val("Team League Data")).strip():
+            fields.append("Team League Data")
+        return fields
+
+    # NEW: filter saved missing list on resume
+    def _filter_missing_rows_after_resume(self):
+        try:
+            audited_indices = {getattr(c[1], "name", None) for c in self.choices if c and c[0] in ("accepted", "to_audit")}
+            filtered = []
+            for idx, _row in (self.missing_rows or []):
+                if idx is None or idx < 0 or idx >= len(self.data):
+                    continue
+                current = self.data.iloc[idx]
+                if self._get_missing_fields(current) and idx not in audited_indices:
+                    filtered.append((idx, current.copy()))
+            self.missing_rows = filtered
+        except Exception:
+            # Leave as-is if anything goes wrong
+            pass
 
     def setup_ui(self):
         self.frame = tk.Frame(self.root)
@@ -109,6 +171,11 @@ class AuditApp:
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas_font = ("Roboto", 18)
 
+        # Add a Save & Quit button pinned to the top-right
+        self.btn_save_quit = ttk.Button(self.frame, text="Save and Quit", command=self.save_and_quit)
+        self.btn_save_quit.place(relx=1.0, x=-20, y=10, anchor='ne')
+        self.btn_save_quit.lift()
+
         # Add back button (hidden until images are shown)
         back_img_path = resource_path("back.png")
         if os.path.exists(back_img_path):
@@ -124,39 +191,101 @@ class AuditApp:
         file_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
         if not file_path:
             return
-        # Ensure TEMP folder exists
-        if not os.path.exists(TEMP_FOLDER):
-            os.makedirs(TEMP_FOLDER)
+        self.original_csv_path = file_path
+
+        # Build per-session paths
+        def _session_paths(csv_path):
+            # Store all session artifacts inside the session TEMP subfolder
+            base_name = os.path.splitext(os.path.basename(csv_path))[0]
+            temp_sub = os.path.join(TEMP_FOLDER, base_name)
+            os.makedirs(temp_sub, exist_ok=True)
+            session_manifest = os.path.join(temp_sub, "audit_session.json")
+            session_data_csv = os.path.join(temp_sub, "audit_session.data.csv")
+            return session_manifest, session_data_csv, temp_sub
+
+        self.session_manifest_path, self.session_data_csv_path, self.temp_folder = _session_paths(file_path)
+
+        # Ask to resume if a previous session exists
+        resumed = False
+        if os.path.exists(self.session_manifest_path):
+            if messagebox.askyesno("Resume audit?", "A previous session was found for this CSV. Resume where you left off?", parent=self.root):
+                try:
+                    with open(self.session_manifest_path, "r", encoding="utf-8") as f:
+                        m = json.load(f)
+                    # restore paths (in case they moved)
+                    self.original_csv_path = m.get("original_csv_path", file_path)
+                    self.session_data_csv_path = m.get("data_csv_path", self.session_data_csv_path)
+                    self.temp_folder = m.get("temp_folder", self.temp_folder)
+
+                    # load working parent rows
+                    self.data = pd.read_csv(self.session_data_csv_path, dtype=str)
+
+                    # rebuild child mapping from original CSV
+                    self.child_records = self._build_child_records(self.original_csv_path)
+
+                    # restore progress
+                    self.index = int(m.get("index", 0))
+                    self.in_missing_loop = m.get("phase", "main") == "missing"
+                    self.missing_index = int(m.get("missing_index", 0))
+                    # Force indices to Python ints
+                    mr_idx = [int(i) for i in m.get("missing_rows_indices", [])]
+                    self.missing_rows = [(idx, self.data.iloc[idx].copy()) for idx in mr_idx if 0 <= idx < len(self.data)]
+
+                    # restore choices
+                    self.choices = []
+                    for rec in m.get("choices", []):
+                        ridx = int(rec.get("row_index", -1))
+                        if 0 <= ridx < len(self.data):
+                            row = self.data.iloc[ridx]
+                            tup = [rec.get("status"), row, bool(rec.get("auto", False))]
+                            if "wrong_fields" in rec:
+                                tup.append(rec["wrong_fields"])
+                            if "wrong_details" in rec:
+                                tup.append(rec["wrong_details"])
+                            self.choices.append(tuple(tup))
+                    # NEW: ensure saved missing list only includes rows still missing and not audited
+                    self._filter_missing_rows_after_resume()
+                    resumed = True
+                except Exception as e:
+                    messagebox.showwarning("Resume failed", f"Could not resume session. Starting a new one.\n\n{e}", parent=self.root)
+        # Ensure per-session TEMP folder exists
+        os.makedirs(self.temp_folder, exist_ok=True)
+
         self.btn_load.pack_forget()
         self.progress_var.set(0)
         self.progress_bar.pack(pady=30)
         self.progress_bar.lift()
         self.progress_bar.update_idletasks()
 
-        self.data = pd.read_csv(file_path, dtype=str)
+        if not resumed:
+            # New session: read CSV and split parent/child records
+            self.data = pd.read_csv(file_path, dtype=str)
 
-        # --- Preprocess: Separate parent and child records ---
-        self.child_records = {}  # {parent_name: [child_rows]}
-        parent_rows = []
-        for idx, row in self.data.iterrows():
-            name = str(row['Name']) if 'Name' in row else ""
-            if " :" in name:
-                parent_name = name.split(" :")[0]
-                self.child_records.setdefault(parent_name, []).append(row.copy())
-            else:
-                parent_rows.append(row.copy())
-        self.data = pd.DataFrame(parent_rows).reset_index(drop=True)
-        total_images = len(self.data)
+            # Preprocess: Separate parent and child records
+            self.child_records = {}  # {parent_name: [child_rows]}
+            parent_rows = []
+            for idx, row in self.data.iterrows():
+                name = str(row['Name']) if 'Name' in row else ""
+                if " :" in name:
+                    parent_name = name.split(" :")[0]
+                    self.child_records.setdefault(parent_name, []).append(row.copy())
+                else:
+                    parent_rows.append(row.copy())
+            self.data = pd.DataFrame(parent_rows).reset_index(drop=True)
+            total_images = len(self.data)
 
-        # --- Create a temporary CSV for parent records only ---
-        self.temp_parent_csv = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
-        self.data.to_csv(self.temp_parent_csv.name, index=False)
-        self.temp_parent_csv.close()
+            # Create a persistent CSV for parent records only
+            self.data.to_csv(self.session_data_csv_path, index=False)
 
-        # Start download in a background thread (using parent-only CSV)
+            parent_csv_for_dl = self.session_data_csv_path
+        else:
+            total_images = len(self.data)
+            parent_csv_for_dl = self.session_data_csv_path
+
+        # Start download in a background thread (idempotent; will skip existing images)
         threading.Thread(
             target=self.download_images_thread,
-            args=(self.temp_parent_csv.name, TEMP_FOLDER),
+            args=(parent_csv_for_dl, self.temp_folder),
             daemon=True
         ).start()
 
@@ -167,7 +296,7 @@ class AuditApp:
         download_helper.download_images(parent_csv_path, temp_folder, item_col='Name', picture_id_col='Picture ID')
 
     def poll_progress(self, total_images):
-        downloaded = len([f for f in os.listdir(TEMP_FOLDER) if f.lower().endswith('.jpg') or f.lower().endswith('.png')])
+        downloaded = len([f for f in os.listdir(self.temp_folder) if f.lower().endswith('.jpg') or f.lower().endswith('.png')])
         percent = (downloaded / total_images) * 100 if total_images else 0
         self.progress_var.set(percent)
         self.progress_bar.update_idletasks()
@@ -177,10 +306,8 @@ class AuditApp:
             self.progress_bar.pack_forget()
             # Continue with rest of setup
             self.data.reset_index(drop=True, inplace=True)
-            self.index = 0
-            self.choices = []
-            self.missing_rows = []
-            self.missing_index = 0
+            # keep existing self.index when resuming, otherwise it is already 0
+            self.missing_rows = self.missing_rows or []
             self.data_missing = None
             self.btn_load.pack_forget()
             bg_path = resource_path("background.png")
@@ -198,55 +325,29 @@ class AuditApp:
 
     def show_image(self):
         if self.data is None or self.index >= len(self.data):
-            # Start missing info fix loop if needed
             if self.missing_rows:
-                # --- Add warning popup before fix_missing_loop ---
-                def show_missing_warning():
-                    popup = tk.Toplevel(self.root)
-                    popup.title("Missing Fields Detected")
-                    popup.transient(self.root)
-                    popup.lift()
-                    frame = ttk.Frame(popup, padding=40)
-                    frame.pack(fill=tk.BOTH, expand=True)
-                    ttk.Label(frame, text="You are about to audit products with missing fields.\nYou must fix these products; the missing field will be autoselected for you.", font=(self.canvas_font)).pack(pady=20)
-                    def on_ok():
-                        popup.destroy()
-                    ttk.Button(frame, text="OK", command=on_ok).pack(pady=10)
-                    popup.protocol("WM_DELETE_WINDOW", self.quit_app)  # Close app if X is clicked
-                    popup.wait_window()
-                    if getattr(self, "_app_quitting", False):
-                        return
-                show_missing_warning()
+                # Use native messagebox so OK button isn't tiny
+                messagebox.showinfo(
+                    "Missing Fields Detected",
+                    "You are about to audit products with missing fields.\nYou must fix these products; the missing field will be autoselected for you.",
+                    parent=self.root
+                )
                 if getattr(self, "_app_quitting", False):
                     return
                 # -------------------------------------------------
                 indices, rows = zip(*self.missing_rows)
                 self.data_missing = pd.DataFrame(list(rows), index=list(indices)).astype('object')
                 self.missing_index = 0
-                self.in_missing_loop = True  # NEW: start missing-loop mode
+                self.in_missing_loop = True
                 self.fix_missing_loop()
                 return
             self.finish()
             return
         row = self.data.iloc[self.index]
-        # Check for missing/invalid fields
-        logo_id = row['Logo ID'] if pd.notna(row['Logo ID']) else ""
-        class_mapping = row['Class Mapping'] if pd.notna(row['Class Mapping']) else ""
-        color_id = row['Parent Color Primary'] if pd.notna(row['Parent Color Primary']) else ""
-        team_league = row['Team League Data'] if pd.notna(row['Team League Data']) else ""
 
-        # Track missing info rows, but show them normally
-        logo_id_missing = (
-            not logo_id or
-            "-tbd" in logo_id.lower() or
-            logo_id.strip() == "- None -"
-        )
-        if (
-            logo_id_missing or
-            not class_mapping or
-            not color_id or
-            not team_league
-        ):
+        # Use unified missing detection
+        missing_fields = self._get_missing_fields(row)
+        if missing_fields:
             # Only add if not already in missing_rows AND not already fixed in choices
             already_fixed = any(
                 entry[1].name == self.index and entry[0] in ('accepted', 'to_audit')
@@ -269,7 +370,7 @@ class AuditApp:
         display_name = row['Display Name'] if pd.notna(row['Display Name']) else ""
         silhouette = row['Silhouette'] if pd.notna(row['Silhouette']) else ""
         web_style = row['Web Style'] if pd.notna(row['Web Style']) else ""
-        img_path = os.path.join(TEMP_FOLDER, f"{row['Name']}.jpg")
+        img_path = os.path.join(self.temp_folder, f"{row['Name']}.jpg")  # <-- was TEMP_FOLDER
         logo_path = find_image(LOGOS_FOLDER, logo_id)
         color_path = find_image(COLORS_FOLDER, color_id)
 
@@ -373,17 +474,9 @@ class AuditApp:
             self.finish()
             return
         row = self.data_missing.iloc[self.missing_index]
-        # Detect missing/invalid fields for autoselection
-        missing_fields = []
-        if not row['Logo ID'] or pd.isna(row['Logo ID']):
-            missing_fields.append("Logo ID")
-        if not row['Class Mapping'] or pd.isna(row['Class Mapping']):
-            missing_fields.append("Class Mapping")
-        if not row['Parent Color Primary'] or pd.isna(row['Parent Color Primary']):
-            missing_fields.append("Parent Color Primary")
-        if not row['Team League Data'] or pd.isna(row['Team League Data']):
-            missing_fields.append("Team League Data")
-        #add more checks if needed here
+
+        # Use unified missing detection for preselection
+        missing_fields = self._get_missing_fields(row)
 
         self.display_row(row)
         # self.btn_back.place_forget()  # REMOVE: keep Back visible during missing-loop
@@ -392,7 +485,7 @@ class AuditApp:
         wrong_info = self.ask_wrong_fields(row, preselected_fields=missing_fields)
         self._popup_open = False
 
-        # NEW: allow "Back" from popup to go to previous missing product
+        # allow "Back" from popup to go to previous missing product
         if isinstance(wrong_info, dict) and wrong_info.get("back"):
             if self.missing_index > 0:
                 self.missing_index -= 1
@@ -405,7 +498,7 @@ class AuditApp:
         wrong_fields = wrong_info["fields"] if isinstance(wrong_info, dict) else []
         wrong_details = wrong_info["details"] if isinstance(wrong_info, dict) else {}
         if not wrong_fields or (isinstance(wrong_fields, list) and all(f.strip() == "" for f in wrong_fields)):
-            messagebox.showwarning("Input required", "You must select at least one field that is wrong before continuing.")
+            messagebox.showwarning("Input required", "You must select at least one field that is wrong before continuing.", parent=self.root)
             return
         # Update the row in self.data_missing and self.data with corrected values
         row_idx = row.name  # This is now the original index in self.data
@@ -435,7 +528,7 @@ class AuditApp:
         wrong_fields = wrong_info["fields"] if isinstance(wrong_info, dict) else []
         wrong_details = wrong_info["details"] if isinstance(wrong_info, dict) else {}
         if not wrong_fields or (isinstance(wrong_fields, list) and all(f.strip() == "" for f in wrong_fields)):
-            messagebox.showwarning("Input required", "You must select at least one field that is wrong before continuing.")
+            messagebox.showwarning("Input required", "You must select at least one field that is wrong before continuing.", parent=self.root)
             return
         # Update the row in self.data with corrected values
         for field, value in wrong_details.items():
@@ -474,17 +567,18 @@ class AuditApp:
             popup.title("Select the field(s) that are wrong")
             popup.transient(self.root)
             popup.lift()
-            # Position the popup in the top right corner
-            self.root.update_idletasks()
-            root_x = self.root.winfo_rootx()
-            root_y = self.root.winfo_rooty()
-            root_width = self.root.winfo_width()
-            popup_width = 500
-            popup_height = 420
-            x = root_x + root_width - popup_width - 40
-            y = root_y + 40
-            popup.geometry(f"{popup_width}x{popup_height}+{x}+{y}")
+            # Ensure this popup has focus and captures all events
+            popup.grab_set()
             popup.focus_force()
+            # Optionally keep on top so focus isn’t stolen on Windows
+            try:
+                popup.attributes("-topmost", True)
+                popup.after(50, lambda: popup.attributes("-topmost", False))
+            except Exception:
+                pass
+
+            # Place this popup at the top-right of the app window
+            self._place_popup(popup, width=500, height=420, align="top-right")
 
             main_frame = ttk.Frame(popup, padding=60)
             main_frame.pack(fill=tk.BOTH, expand=True)
@@ -526,7 +620,6 @@ class AuditApp:
                         selected.append(other_text)
                     else:
                         selected.append("Other")
-                # --- ENFORCE LOGIC HERE ---
                 if "Team League Data" in selected:
                     if "Parent Color Primary" not in selected:
                         selected.append("Parent Color Primary")
@@ -550,9 +643,12 @@ class AuditApp:
             btn_bar.pack(pady=10, anchor='e', fill=tk.X)
             if getattr(self, "in_missing_loop", False):
                 ttk.Button(btn_bar, text="Back", command=go_back).pack(side=tk.LEFT)
-            ttk.Button(btn_bar, text="OK", command=submit).pack(side=tk.RIGHT)
+            ok_btn = ttk.Button(btn_bar, text="OK", command=submit)
+            ok_btn.pack(side=tk.RIGHT)
 
+            # Bind Enter to submit and focus OK by default so user can press Enter
             popup.bind('<Return>', lambda event: submit())
+            popup.after(0, ok_btn.focus_set)
             popup.wait_window()
 
         show_popup()
@@ -571,12 +667,16 @@ class AuditApp:
             style.theme_use("arc")
             sel_popup.configure(bg="#f7f7f7")
             sel_popup.title(title)
-            sel_popup.focus_force()
+            sel_popup.transient(self.root)
+            sel_popup.lift()
+
+            # Place selector popups centered on the same screen
+            self._place_popup(sel_popup, width=720, height=520, align="center")
 
             main_frame = ttk.Frame(sel_popup, padding=20)
             main_frame.pack(fill=tk.BOTH, expand=True)
 
-            # NEW: Style Number copy bar in selector popups too
+            # Style Number copy bar
             copy_bar = ttk.Frame(main_frame)
             copy_bar.pack(fill=tk.X, pady=(0, 8))
             ttk.Label(copy_bar, text="Style Number:").pack(side=tk.LEFT)
@@ -593,10 +693,18 @@ class AuditApp:
             search_entry.pack(pady=(0, 10), anchor='w')
             search_entry.focus_set()
 
+            # NEW: wrap horizontal content in its own frame so the bottom buttons don't get squeezed
+            content_frame = ttk.Frame(main_frame)
+            content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
             filtered_options = options.copy()
             listbox_var = tk.StringVar(value=filtered_options)
+
+            # List with scrollbar (keeps a stable width/height)
+            list_frame = ttk.Frame(content_frame)
+            list_frame.pack(side=tk.LEFT, pady=10, fill=tk.Y)
             listbox = tk.Listbox(
-                main_frame,
+                list_frame,
                 listvariable=listbox_var,
                 width=80,
                 height=min(15, len(filtered_options)),
@@ -606,28 +714,39 @@ class AuditApp:
                 highlightthickness=0,
                 borderwidth=0
             )
-            listbox.pack(side=tk.LEFT, pady=10, fill=tk.Y)
+            listbox.pack(side=tk.LEFT, fill=tk.Y)
+            scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
+            scrollbar.pack(side=tk.LEFT, fill=tk.Y)
+            listbox.config(yscrollcommand=scrollbar.set)
 
+            # Image preview in a fixed-size container to avoid resizing the dialog/buttons
             image_label = None
             img_cache = {}
+            if show_images and image_folder:
+                image_container = ttk.Frame(content_frame, width=180, height=180)
+                image_container.pack_propagate(False)  # keep fixed size
+                image_container.pack(side=tk.LEFT, padx=(10, 0), pady=10)
+                image_label = ttk.Label(image_container, anchor="center")
+                image_label.pack(expand=True, fill=tk.BOTH)
+
             def show_logo_img(event):
+                if not (image_label and show_images and image_folder):
+                    return
                 sel = listbox.curselection()
-                if sel and show_images and image_folder:
+                if sel:
                     logo_id = filtered_options[sel[0]]
                     img_path = find_image(image_folder, logo_id)
                     if img_path and os.path.exists(img_path):
-                        img = Image.open(img_path)
-                        img = img.resize((150, 150))
+                        img = Image.open(img_path).resize((150, 150))
                         tk_img = ImageTk.PhotoImage(img)
                         img_cache["img"] = tk_img
                         image_label.config(image=tk_img, text="")
                     else:
                         image_label.config(image="", text="No image found")
-                elif image_label:
+                else:
                     image_label.config(image="", text="")
+
             if show_images and image_folder:
-                image_label = ttk.Label(main_frame)
-                image_label.pack(side=tk.LEFT, padx=(10, 0), pady=10, fill=tk.BOTH, expand=True)
                 listbox.bind("<<ListboxSelect>>", show_logo_img)
 
             def filter_options(*args):
@@ -648,13 +767,12 @@ class AuditApp:
                     local["value"] = filtered_options[sel[0]]
                     sel_popup.destroy()
 
+            # Bottom button row stays full size
             btn_frame = ttk.Frame(main_frame)
-            btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
-            ttk.Button(btn_frame, text="OK", command=on_select).pack()
+            btn_frame.pack(side=tk.BOTTOM, fill=tk.X)
+            ttk.Button(btn_frame, text="OK", command=on_select).pack(anchor='e')
 
-            # If user clicks X, quit the whole app
             sel_popup.protocol("WM_DELETE_WINDOW", self.quit_app)
-
             sel_popup.bind('<Return>', on_select)
             sel_popup.wait_window()
             if getattr(self, "_app_quitting", False):
@@ -744,7 +862,15 @@ class AuditApp:
 
     def finish(self):
         self.save_outputs()
-        messagebox.showinfo("Done", "Audit complete!\nFile saved as to_audit.csv.")
+        messagebox.showinfo("Done", "Audit complete!\nFile saved as to_audit.csv.", parent=self.root)
+        self.completed = True
+        self._cleanup_session_files()
+        # Clean up this session's TEMP folder
+        if os.path.exists(self.temp_folder):
+            try:
+                shutil.rmtree(self.temp_folder)
+            except Exception as e:
+                print(f"Failed to delete TEMP folder: {e}")
         self.root.quit()
 
     def save_outputs(self):
@@ -783,8 +909,12 @@ class AuditApp:
                 print(f"Failed to delete TEMP folder: {e}")
 
     def on_close(self):
-        self.save_outputs()
-        self.root.destroy()
+        # Save session state (resume later) and close
+        try:
+            if not self.completed:
+                self.save_session()
+        finally:
+            self.root.destroy()
 
     # NEW: helper to count audited parent products (unique parent indices)
     def _audited_count(self):
@@ -806,10 +936,106 @@ class AuditApp:
             except Exception:
                 pass
 
+    # explicit Save & Quit handler
+    def save_and_quit(self):
+        if messagebox.askyesno("Save and Quit", "Save your current progress and quit now?", parent=self.root):
+            self.quit_app()
+
+    # ---- session helpers ----
+    def _build_child_records(self, csv_path):
+        try:
+            df_full = pd.read_csv(csv_path, dtype=str)
+        except Exception:
+            return {}
+        child_records = {}
+        for _, row in df_full.iterrows():
+            name = str(row['Name']) if 'Name' in row else ""
+            if " :" in name:
+                parent_name = name.split(" :")[0]
+                child_records.setdefault(parent_name, []).append(row.copy())
+        return child_records
+
+    def save_session(self):
+        if self.data is None:
+            return
+
+        # persist current parent rows (with any corrections)
+        try:
+            self.data.to_csv(self.session_data_csv_path, index=False)
+        except Exception as e:
+            print(f"Failed to write session data CSV: {e}")
+
+        # helper: safe int conversion (handles numpy int64)
+        def _to_int(v, default=None):
+            try:
+                return int(v)
+            except Exception:
+                return default
+
+        # serialize minimal state (ensure pure Python types)
+        missing_indices = []
+        for idx, _ in (self.missing_rows or []):
+            i = _to_int(idx)
+            if i is not None:
+                missing_indices.append(i)
+
+        serial_choices = []
+        for entry in self.choices:
+            try:
+                row_index = _to_int(getattr(entry[1], "name", -1), default=-1)
+                rec = {
+                    "status": entry[0],
+                    "row_index": row_index,
+                    "auto": bool(entry[2]),
+                }
+                if len(entry) > 3:
+                    # ensure wrong_fields is list of strings
+                    rec["wrong_fields"] = [str(x) for x in entry[3]] if isinstance(entry[3], (list, tuple)) else [str(entry[3])]
+                if len(entry) > 4 and isinstance(entry[4], dict):
+                    # ensure wrong_details is a dict of strings
+                    rec["wrong_details"] = {str(k): str(v) for k, v in entry[4].items()}
+                serial_choices.append(rec)
+            except Exception:
+                pass
+
+        manifest = {
+            "created": datetime.datetime.now().isoformat(),
+            "original_csv_path": str(self.original_csv_path) if self.original_csv_path else "",
+            "data_csv_path": str(self.session_data_csv_path) if self.session_data_csv_path else "",
+            "index": _to_int(self.index, 0),
+            "phase": "missing" if self.in_missing_loop else "main",
+            "missing_index": _to_int(self.missing_index, 0),
+            "missing_rows_indices": missing_indices,
+            "choices": serial_choices,
+            "temp_folder": str(self.temp_folder) if self.temp_folder else TEMP_FOLDER,
+        }
+        try:
+            with open(self.session_manifest_path, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, indent=2)
+        except Exception as e:
+            print(f"Failed to write session manifest: {e}")
+
+    def _cleanup_session_files(self):
+        for p in [self.session_manifest_path, self.session_data_csv_path]:
+            try:
+                if p and os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
+
+    def handle_app_exit(self):
+        if not self.completed:
+            self.save_session()
+
 if __name__ == "__main__":
-    root = ThemedTk(theme="arc")
+    try:
+        root = ThemedTk(theme="arc")
+    except Exception:
+        # Fallback if ttkthemes isn't available
+        root = tk.Tk()
     app = AuditApp(root)
     try:
         root.mainloop()
     finally:
-        app.save_outputs()
+        # Save session on unexpected exit
+        app.handle_app_exit()
