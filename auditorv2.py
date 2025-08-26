@@ -26,7 +26,6 @@ To Package: pyinstaller --onefile --noconsole --hidden-import=tkinter --add-data
 """
 
 # TODO
-#Save and quit/resume logic
 #Other needs to work
 #image is wrong option + separate csv for that
 
