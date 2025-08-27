@@ -83,6 +83,8 @@ class AuditApp:
         self.session_data_csv_path = None
         self.temp_folder = TEMP_FOLDER  # per-session subfolder will override this
         self.completed = False
+        # Track products marked as wrong image (parent Name values)
+        self.wrong_image_names = set()
 
     # Helper: place a popup on the same screen as the root
     def _place_popup(self, popup, width, height, align="center", margin=40):
@@ -126,7 +128,7 @@ class AuditApp:
     # NEW: filter saved missing list on resume
     def _filter_missing_rows_after_resume(self):
         try:
-            audited_indices = {getattr(c[1], "name", None) for c in self.choices if c and c[0] in ("accepted", "to_audit")}
+            audited_indices = {getattr(c[1], "name", None) for c in self.choices if c and c[0] in ("accepted", "to_audit", "wrong_image")}
             filtered = []
             for idx, _row in (self.missing_rows or []):
                 if idx is None or idx < 0 or idx >= len(self.data):
@@ -242,6 +244,8 @@ class AuditApp:
                             if "wrong_details" in rec:
                                 tup.append(rec["wrong_details"])
                             self.choices.append(tuple(tup))
+                    # restore wrong image selections
+                    self.wrong_image_names = set(m.get("wrong_images", []))
                     # NEW: ensure saved missing list only includes rows still missing and not audited
                     self._filter_missing_rows_after_resume()
                     resumed = True
@@ -349,7 +353,7 @@ class AuditApp:
         if missing_fields:
             # Only add if not already in missing_rows AND not already fixed in choices
             already_fixed = any(
-                entry[1].name == self.index and entry[0] in ('accepted', 'to_audit')
+                entry[1].name == self.index and entry[0] in ('accepted', 'to_audit', 'wrong_image')
                 for entry in self.choices
             )
             if not any(idx == self.index for idx, _ in self.missing_rows) and not already_fixed:
@@ -496,6 +500,20 @@ class AuditApp:
 
         wrong_fields = wrong_info["fields"] if isinstance(wrong_info, dict) else []
         wrong_details = wrong_info["details"] if isinstance(wrong_info, dict) else {}
+
+        # If user marked as Wrong Image, record and move on (do not include in to_audit)
+        if "Wrong Image" in wrong_fields:
+            try:
+                name_val = str(row['Name']) if 'Name' in row else ""
+            except Exception:
+                name_val = ""
+            if name_val:
+                self.wrong_image_names.add(name_val)
+            self.choices.append(('wrong_image', row, False))
+            self.missing_index += 1
+            self.fix_missing_loop()
+            return
+
         if not wrong_fields or (isinstance(wrong_fields, list) and all(f.strip() == "" for f in wrong_fields)):
             messagebox.showwarning("Input required", "You must select at least one field that is wrong before continuing.", parent=self.root)
             return
@@ -526,6 +544,20 @@ class AuditApp:
         self._popup_open = False
         wrong_fields = wrong_info["fields"] if isinstance(wrong_info, dict) else []
         wrong_details = wrong_info["details"] if isinstance(wrong_info, dict) else {}
+
+        # If user marked as Wrong Image, record and move on (do not include in to_audit)
+        if "Wrong Image" in wrong_fields:
+            try:
+                name_val = str(row['Name']) if 'Name' in row else ""
+            except Exception:
+                name_val = ""
+            if name_val:
+                self.wrong_image_names.add(name_val)
+            self.choices.append(('wrong_image', row, False))
+            self.index += 1
+            self.show_image()
+            return
+
         if not wrong_fields or (isinstance(wrong_fields, list) and all(f.strip() == "" for f in wrong_fields)):
             messagebox.showwarning("Input required", "You must select at least one field that is wrong before continuing.", parent=self.root)
             return
@@ -538,6 +570,7 @@ class AuditApp:
 
     def ask_wrong_fields(self, row, preselected_fields=None, force_fix=False):
         fields = [
+            "Wrong Image",
             "Logo ID",
             "Class Mapping",
             "Parent Color Primary",
@@ -853,6 +886,14 @@ class AuditApp:
             status, row, auto_rejected = entry[:3]
             if not auto_rejected:
                 self.choices.pop(i)
+                # If we undid a wrong_image, remove it from the set
+                if status == 'wrong_image':
+                    try:
+                        name_val = str(row['Name']) if 'Name' in row else ""
+                        if name_val in self.wrong_image_names:
+                            self.wrong_image_names.remove(name_val)
+                    except Exception:
+                        pass
                 self.index = row.name
                 self.missing_rows = [(idx, r) for idx, r in self.missing_rows if idx != self.index]
                 self.show_image()
@@ -861,7 +902,7 @@ class AuditApp:
 
     def finish(self):
         self.save_outputs()
-        messagebox.showinfo("Done", "Audit complete!\nFile saved as to_audit.csv.", parent=self.root)
+        messagebox.showinfo("Done", "Audit complete!\nFiles saved as to_audit.csv and wrong_images.csv.", parent=self.root)
         self.completed = True
         self._cleanup_session_files()
         # Clean up this session's TEMP folder
@@ -874,32 +915,58 @@ class AuditApp:
 
     def save_outputs(self):
         if self.data is None or self.data.empty:
+            # Still write an empty wrong_images.csv with header if nothing else
+            try:
+                with open("wrong_images.csv", "w", newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Name"])
+                    for n in sorted(set(self.wrong_image_names)):
+                        writer.writerow([n])
+            except Exception as e:
+                print(f"Failed to write wrong_images.csv: {e}")
             return
+
         exclude_cols = {"Picture ID", "Image Assignment"}
         output_rows = []
+        wrong_set = set(self.wrong_image_names)
+
         for _, parent_row in self.data.iterrows():
-            output_rows.append(parent_row.copy())
             parent_name = str(parent_row['Name']) if 'Name' in parent_row else ""
+            # Skip parents marked as wrong image
+            if parent_name in wrong_set:
+                continue
+
+            output_rows.append(parent_row.copy())
+
+            # Include children only for included parents
             if hasattr(self, 'child_records') and parent_name in self.child_records:
                 for child_row in self.child_records[parent_name]:
-                    # Copy all parent values to child, except Name and Internal ID
                     new_child = parent_row.copy()
                     new_child['Name'] = child_row['Name']
-
-                    # Safely map child's Internal ID to the output
                     internal_id = None
                     for key in ('Internal ID', 'Internal ID.1', 'Internal ID 0', 'InternalID0', 'InternalID', 'Internal ID0'):
                         if key in child_row and pd.notna(child_row[key]):
                             internal_id = child_row[key]
                             break
                     new_child['Internal ID'] = internal_id if internal_id is not None else ""
-
                     output_rows.append(new_child)
+
         output_df = pd.DataFrame(output_rows)
         output_df = output_df[[col for col in output_df.columns if col not in exclude_cols]].copy()
         today_str = datetime.datetime.now().strftime("%m/%d/%Y")
         output_df["Flash Sale Date"] = today_str
         output_df.to_csv("to_audit.csv", index=False)
+
+        # Write wrong_images.csv (unique parent Names)
+        try:
+            with open("wrong_images.csv", "w", newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Name"])
+                for n in sorted(wrong_set):
+                    writer.writerow([n])
+        except Exception as e:
+            print(f"Failed to write wrong_images.csv: {e}")
+
         # Delete the entire TEMP folder
         if os.path.exists(TEMP_FOLDER):
             try:
@@ -1007,6 +1074,7 @@ class AuditApp:
             "missing_rows_indices": missing_indices,
             "choices": serial_choices,
             "temp_folder": str(self.temp_folder) if self.temp_folder else TEMP_FOLDER,
+            "wrong_images": sorted(list(self.wrong_image_names)),
         }
         try:
             with open(self.session_manifest_path, "w", encoding="utf-8") as f:
