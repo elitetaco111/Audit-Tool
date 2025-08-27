@@ -23,11 +23,14 @@ It also provides functionality to handle missing or incorrect data by allowing u
 github.com/elitetaco111/audit-tool
 
 To Package: pyinstaller --onefile --noconsole --hidden-import=tkinter --add-data "ColorList.csv;." --add-data "LogoList.csv;." --add-data "TeamList.csv;." --add-data "ClassMappingList.csv;." --add-data "choose.png;." --add-data "back.png;." --add-data "background.png;." --add-data "Logos;Logos" --add-data "Colors;Colors" auditorv2.py
+
+CHANGES:
+Added product count
+Added display name, web style, silhouette
+Added Save and Quit functionality
+Added wrong image option
 """
 
-# TODO
-#Other needs to work
-#image is wrong option + separate csv for that
 
 TEMP_FOLDER = "TEMP"
 LOGOS_FOLDER = "Logos"
@@ -570,12 +573,11 @@ class AuditApp:
 
     def ask_wrong_fields(self, row, preselected_fields=None, force_fix=False):
         fields = [
-            "Wrong Image",
             "Logo ID",
             "Class Mapping",
             "Parent Color Primary",
             "Team League Data",
-            "Other"
+            "Wrong Image"
         ]
         # include a 'back' flag
         result = {"value": None, "details": {}, "back": False}
@@ -615,7 +617,7 @@ class AuditApp:
             main_frame = ttk.Frame(popup, padding=60)
             main_frame.pack(fill=tk.BOTH, expand=True)
 
-            # NEW: Style Number copy bar (double-click to copy)
+            # Style Number copy bar (double-click to copy)
             copy_bar = ttk.Frame(main_frame)
             copy_bar.pack(fill=tk.X, pady=(0, 12))
             ttk.Label(copy_bar, text="Style Number:").pack(side=tk.LEFT)
@@ -634,31 +636,16 @@ class AuditApp:
             for field in fields:
                 ttk.Checkbutton(main_frame, text=field, variable=vars[field]).pack(anchor='w', pady=2)
 
-            custom_var = tk.StringVar()
-            entry = ttk.Entry(main_frame, textvariable=custom_var)
-
-            def on_other_checked(*args):
-                if vars["Other"].get():
-                    entry.pack(pady=5, anchor='w')
-                else:
-                    entry.pack_forget()
-            vars["Other"].trace_add("write", on_other_checked)
-
             def submit():
-                selected = [field for field in fields if vars[field].get() and field != "Other"]
-                if vars["Other"].get():
-                    other_text = custom_var.get().strip()
-                    if other_text:
-                        selected.append(other_text)
-                    else:
-                        selected.append("Other")
+                selected = [field for field in fields if vars[field].get()]
+                # Auto-include dependencies if Team League Data is selected
                 if "Team League Data" in selected:
                     if "Parent Color Primary" not in selected:
                         selected.append("Parent Color Primary")
                     if "Logo ID" not in selected:
                         selected.append("Logo ID")
-                if not selected or (len(selected) == 1 and selected[0] == "Other"):
-                    messagebox.showwarning("Input required", "Please select at least one field or enter a value for 'Other'.", parent=popup)
+                if not selected:
+                    messagebox.showwarning("Input required", "Please select at least one field.", parent=popup)
                     return
                 result["value"] = selected
                 popup.destroy()
@@ -756,7 +743,7 @@ class AuditApp:
             img_cache = {}
             if show_images and image_folder:
                 image_container = ttk.Frame(content_frame, width=180, height=180)
-                image_container.pack_propagate(False)  # keep fixed size
+                image_container.pack_propagate(False)
                 image_container.pack(side=tk.LEFT, padx=(10, 0), pady=10)
                 image_label = ttk.Label(image_container, anchor="center")
                 image_label.pack(expand=True, fill=tk.BOTH)
@@ -902,7 +889,11 @@ class AuditApp:
 
     def finish(self):
         self.save_outputs()
-        messagebox.showinfo("Done", "Audit complete!\nFiles saved as to_audit.csv and wrong_images.csv.", parent=self.root)
+        # Add date to the filenames in the message
+        date_suffix = datetime.datetime.now().strftime("%Y-%m-%d")
+        to_audit_filename = f"to_audit_{date_suffix}.csv"
+        wrong_images_filename = f"wrong_images_{date_suffix}.csv"
+        messagebox.showinfo("Done", f"Audit complete!\nFiles saved as {to_audit_filename} and {wrong_images_filename}.", parent=self.root)
         self.completed = True
         self._cleanup_session_files()
         # Clean up this session's TEMP folder
@@ -914,16 +905,21 @@ class AuditApp:
         self.root.quit()
 
     def save_outputs(self):
+        # Build dated filenames
+        date_suffix = datetime.datetime.now().strftime("%Y-%m-%d")
+        to_audit_filename = f"to_audit_{date_suffix}.csv"
+        wrong_images_filename = f"wrong_images_{date_suffix}.csv"
+
         if self.data is None or self.data.empty:
-            # Still write an empty wrong_images.csv with header if nothing else
+            # Still write a wrong_images file (even if no parent data)
             try:
-                with open("wrong_images.csv", "w", newline='', encoding='utf-8') as f:
+                with open(wrong_images_filename, "w", newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
                     writer.writerow(["Name"])
                     for n in sorted(set(self.wrong_image_names)):
                         writer.writerow([n])
             except Exception as e:
-                print(f"Failed to write wrong_images.csv: {e}")
+                print(f"Failed to write {wrong_images_filename}: {e}")
             return
 
         exclude_cols = {"Picture ID", "Image Assignment"}
@@ -955,17 +951,17 @@ class AuditApp:
         output_df = output_df[[col for col in output_df.columns if col not in exclude_cols]].copy()
         today_str = datetime.datetime.now().strftime("%m/%d/%Y")
         output_df["Flash Sale Date"] = today_str
-        output_df.to_csv("to_audit.csv", index=False)
+        output_df.to_csv(to_audit_filename, index=False)
 
-        # Write wrong_images.csv (unique parent Names)
+        # Write wrong_images (unique parent Names)
         try:
-            with open("wrong_images.csv", "w", newline='', encoding='utf-8') as f:
+            with open(wrong_images_filename, "w", newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 writer.writerow(["Name"])
                 for n in sorted(wrong_set):
                     writer.writerow([n])
         except Exception as e:
-            print(f"Failed to write wrong_images.csv: {e}")
+            print(f"Failed to write {wrong_images_filename}: {e}")
 
         # Delete the entire TEMP folder
         if os.path.exists(TEMP_FOLDER):
