@@ -373,7 +373,7 @@ class AuditApp:
         class_mapping = row['Class Mapping'] if pd.notna(row['Class Mapping']) else ""
         color_id = row['Parent Color Primary'] if pd.notna(row['Parent Color Primary']) else ""
         team_league = row['Team League Data'] if pd.notna(row['Team League Data']) else ""
-        display_name = row['Display Name'] if pd.notna(row['Display Name']) else ""
+        display_name = row['Web Display Name'] if pd.notna(row['Web Display Name']) else ""
         silhouette = row['Silhouette'] if pd.notna(row['Silhouette']) else ""
         web_style = row['Web Style'] if pd.notna(row['Web Style']) else ""
         img_path = os.path.join(self.temp_folder, f"{row['Name']}.jpg")  # <-- was TEMP_FOLDER
@@ -437,7 +437,7 @@ class AuditApp:
         y_offset += 35
 
         # Display Name
-        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Display Name: {display_name}", font=self.canvas_font)
+        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Web Display Name: {display_name}", font=self.canvas_font)
         y_offset += 35
 
         # Silhouette Name
