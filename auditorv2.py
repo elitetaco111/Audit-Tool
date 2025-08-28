@@ -30,10 +30,6 @@ Added display name, web style, silhouette
 Added Save and Quit functionality
 Added wrong image option
 """
-# Silhouette to fix testing
-# Smaller Web Display Name
-# Web style + Silhouette plain text change
-
 TEMP_FOLDER = "TEMP"
 LOGOS_FOLDER = "Logos"
 COLORS_FOLDER = "Colors"
