@@ -86,6 +86,9 @@ class AuditApp:
         self.completed = False
         # Track products marked as wrong image (parent Name values)
         self.wrong_image_names = set()
+        # NEW: track download lifecycle and expected names
+        self.download_done = False
+        self.expected_names = []
 
     # Helper: place a popup on the same screen as the root
     def _place_popup(self, popup, width, height, align="center", margin=40):
@@ -277,6 +280,8 @@ class AuditApp:
                     parent_rows.append(row.copy())
             self.data = pd.DataFrame(parent_rows).reset_index(drop=True)
             total_images = len(self.data)
+            # NEW: expected names list for download verification
+            self.expected_names = [str(n) if pd.notna(n) else "" for n in self.data.get('Name', [])]
 
             # Create a persistent CSV for parent records only
             self.data.to_csv(self.session_data_csv_path, index=False)
@@ -284,6 +289,8 @@ class AuditApp:
             parent_csv_for_dl = self.session_data_csv_path
         else:
             total_images = len(self.data)
+            # NEW: expected names list for download verification
+            self.expected_names = [str(n) if pd.notna(n) else "" for n in self.data.get('Name', [])]
             parent_csv_for_dl = self.session_data_csv_path
 
         # Start download in a background thread (idempotent; will skip existing images)
@@ -297,35 +304,56 @@ class AuditApp:
         self.poll_progress(total_images)
 
     def download_images_thread(self, parent_csv_path, temp_folder):
-        download_helper.download_images(parent_csv_path, temp_folder, item_col='Name', picture_id_col='Picture ID')
+        try:
+            download_helper.download_images(parent_csv_path, temp_folder, item_col='Name', picture_id_col='Picture ID')
+        finally:
+            # NEW: mark download complete so we can reconcile failures
+            self.download_done = True
 
     def poll_progress(self, total_images):
+        # NEW: use expected count (parents) for progress display
+        total_expected = len(self.expected_names) if self.expected_names else total_images
         downloaded = len([f for f in os.listdir(self.temp_folder) if f.lower().endswith('.jpg') or f.lower().endswith('.png')])
-        percent = (downloaded / total_images) * 100 if total_images else 0
-        self.progress_var.set(percent)
-        self.progress_bar.update_idletasks()
-        self.progress_bar.lift()
-        self.root.update_idletasks()
-        if downloaded >= total_images:
-            self.progress_bar.pack_forget()
-            # Continue with rest of setup
-            self.data.reset_index(drop=True, inplace=True)
-            # keep existing self.index when resuming, otherwise it is already 0
-            self.missing_rows = self.missing_rows or []
-            self.data_missing = None
-            self.btn_load.pack_forget()
-            bg_path = resource_path("background.png")
-            if os.path.exists(bg_path):
-                bg_img = Image.open(bg_path)
-                bg_img = bg_img.resize((1920, 1080))
-                self.tk_bg_img = ImageTk.PhotoImage(bg_img)
-                # Draw background image as the first (bottom) item on the canvas
-                self.bg_image_id = self.canvas.create_image(0, 0, anchor='nw', image=self.tk_bg_img)
-                self.canvas.tag_lower(self.bg_image_id)  # Ensure it's at the very back
 
-            self.show_image()
-        else:
+        if not self.download_done:
+            percent = (downloaded / total_expected) * 100 if total_expected else 0
+            # Keep UI responsive and show progress until thread completes
+            self.progress_var.set(min(percent, 99.0))
+            self.progress_bar.update_idletasks()
+            self.progress_bar.lift()
+            self.root.update_idletasks()
             self.root.after(100, lambda: self.poll_progress(total_images))
+            return
+
+        # Download thread finished: reconcile failures (missing files)
+        present_basenames = {os.path.splitext(f)[0] for f in os.listdir(self.temp_folder)
+                             if f.lower().endswith('.jpg') or f.lower().endswith('.png')}
+        expected_set = set(self.expected_names)
+        failed_names = sorted(expected_set - present_basenames)
+
+        # Add failed downloads to "wrong images" and exclude from audit flow
+        if failed_names:
+            self.wrong_image_names.update(failed_names)
+
+        # Wrap up progress UI
+        self.progress_var.set(100)
+        self.progress_bar.update_idletasks()
+        self.progress_bar.pack_forget()
+
+        # Continue with rest of setup
+        self.data.reset_index(drop=True, inplace=True)
+        self.missing_rows = self.missing_rows or []
+        self.data_missing = None
+        self.btn_load.pack_forget()
+        bg_path = resource_path("background.png")
+        if os.path.exists(bg_path):
+            bg_img = Image.open(bg_path)
+            bg_img = bg_img.resize((1920, 1080))
+            self.tk_bg_img = ImageTk.PhotoImage(bg_img)
+            self.bg_image_id = self.canvas.create_image(0, 0, anchor='nw', image=self.tk_bg_img)
+            self.canvas.tag_lower(self.bg_image_id)
+
+        self.show_image()
 
     def show_image(self):
         if self.data is None or self.index >= len(self.data):
@@ -348,6 +376,16 @@ class AuditApp:
             self.finish()
             return
         row = self.data.iloc[self.index]
+
+        # NEW: skip rows whose image failed to download (removed from audit flow)
+        try:
+            name_val = str(row['Name']) if 'Name' in row else ""
+        except Exception:
+            name_val = ""
+        if name_val in self.wrong_image_names:
+            self.index += 1
+            self.show_image()
+            return
 
         # Use unified missing detection
         missing_fields = self._get_missing_fields(row)
@@ -478,8 +516,13 @@ class AuditApp:
 
         # progress counter to the right of the Style Number entry
         audited = self._audited_count()
-        total = len(self.data) if self.data is not None else 0
-        progress_text = f"Audited: {audited} / {total}"
+        # NEW: effective total excludes rows with failed downloads or user-marked wrong images
+        try:
+            data_names_iter = self.data['Name'] if 'Name' in self.data.columns else []
+            effective_total = sum(1 for n in data_names_iter if str(n) not in self.wrong_image_names)
+        except Exception:
+            effective_total = len(self.data) if self.data is not None else 0
+        progress_text = f"Audited: {audited} / {effective_total}"
         if not self.progress_label or not self.progress_label.winfo_exists():
             self.progress_label = ttk.Label(self.frame, text=progress_text, font=self.canvas_font)
         else:
