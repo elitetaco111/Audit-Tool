@@ -596,6 +596,8 @@ class AuditApp:
             "Class Mapping",
             "Parent Color Primary",
             "Team League Data",
+            "Silhouette",       # NEW
+            "Web Style",        # NEW
             "Wrong Image"
         ]
         # include a 'back' flag
@@ -631,7 +633,7 @@ class AuditApp:
                 pass
 
             # Place this popup at the top-right of the app window
-            self._place_popup(popup, width=500, height=420, align="top-right")
+            self._place_popup(popup, width=500, height=520, align="top-right")
 
             main_frame = ttk.Frame(popup, padding=60)
             main_frame.pack(fill=tk.BOTH, expand=True)
@@ -652,8 +654,48 @@ class AuditApp:
                 for field in preselected_fields:
                     if field in vars:
                         vars[field].set(True)
+
+            # Checkboxes container
+            checks_frame = ttk.Frame(main_frame)
+            checks_frame.pack(fill=tk.X, anchor='w')
+
+            # NEW: free-form inputs for Silhouette and Web Style
+            silhouette_var = tk.StringVar(value=(row['Silhouette'] if 'Silhouette' in row and pd.notna(row['Silhouette']) else ""))
+            web_style_var = tk.StringVar(value=(row['Web Style'] if 'Web Style' in row and pd.notna(row['Web Style']) else ""))
+
+            silhouette_frame = ttk.Frame(main_frame)
+            ttk.Label(silhouette_frame, text="Silhouette should be:").pack(side=tk.LEFT, padx=(0, 8))
+            ttk.Entry(silhouette_frame, textvariable=silhouette_var, width=36).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+            web_style_frame = ttk.Frame(main_frame)
+            ttk.Label(web_style_frame, text="Web Style should be:").pack(side=tk.LEFT, padx=(0, 8))
+            ttk.Entry(web_style_frame, textvariable=web_style_var, width=36).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+            # Toggle helpers
+            def toggle_silhouette():
+                if vars["Silhouette"].get():
+                    silhouette_frame.pack(fill=tk.X, pady=(6, 0), anchor='w')
+                else:
+                    silhouette_frame.pack_forget()
+
+            def toggle_web_style():
+                if vars["Web Style"].get():
+                    web_style_frame.pack(fill=tk.X, pady=(6, 0), anchor='w')
+                else:
+                    web_style_frame.pack_forget()
+
+            # Build checkboxes (attach toggle command for the two new fields)
             for field in fields:
-                ttk.Checkbutton(main_frame, text=field, variable=vars[field]).pack(anchor='w', pady=2)
+                if field == "Silhouette":
+                    ttk.Checkbutton(checks_frame, text=field, variable=vars[field], command=toggle_silhouette).pack(anchor='w', pady=2)
+                elif field == "Web Style":
+                    ttk.Checkbutton(checks_frame, text=field, variable=vars[field], command=toggle_web_style).pack(anchor='w', pady=2)
+                else:
+                    ttk.Checkbutton(checks_frame, text=field, variable=vars[field]).pack(anchor='w', pady=2)
+
+            # If preselected includes these, show their inputs now
+            toggle_silhouette()
+            toggle_web_style()
 
             def submit():
                 selected = [field for field in fields if vars[field].get()]
@@ -663,10 +705,23 @@ class AuditApp:
                         selected.append("Parent Color Primary")
                     if "Logo ID" not in selected:
                         selected.append("Logo ID")
-                if not selected:
-                    messagebox.showwarning("Input required", "Please select at least one field.", parent=popup)
+
+                # Require values for free-form fields if selected
+                if "Silhouette" in selected and not silhouette_var.get().strip():
+                    messagebox.showwarning("Input required", "Please enter a value for Silhouette.", parent=popup)
                     return
+                if "Web Style" in selected and not web_style_var.get().strip():
+                    messagebox.showwarning("Input required", "Please enter a value for Web Style.", parent=popup)
+                    return
+
                 result["value"] = selected
+                # Pre-populate details for free-form fields
+                details = {}
+                if "Silhouette" in selected:
+                    details["Silhouette"] = silhouette_var.get().strip()
+                if "Web Style" in selected:
+                    details["Web Style"] = web_style_var.get().strip()
+                result["details"] = details
                 popup.destroy()
 
             def go_back():
@@ -697,7 +752,7 @@ class AuditApp:
             return {"back": True}
 
         wrong_fields = result["value"]
-        wrong_details = {}
+        wrong_details = dict(result.get("details", {}))  # may already contain Silhouette/Web Style
 
         def select_from_list(title, label, options, show_images=False, image_folder=None):
             sel_popup = tk.Toplevel(self.root)
