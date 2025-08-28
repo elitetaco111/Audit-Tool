@@ -11,7 +11,7 @@ from ttkthemes import ThemedTk
 import threading
 import datetime
 import tempfile
-import json  # <-- added
+import json 
 
 """
 Developed by Dave Nissly
@@ -30,7 +30,9 @@ Added display name, web style, silhouette
 Added Save and Quit functionality
 Added wrong image option
 """
-
+# Silhouette to fix testing
+# Smaller Web Display Name
+# Web style + Silhouette plain text change
 
 TEMP_FOLDER = "TEMP"
 LOGOS_FOLDER = "Logos"
@@ -436,10 +438,6 @@ class AuditApp:
         self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Team League Data: {team_league}", font=self.canvas_font)
         y_offset += 35
 
-        # Display Name
-        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Web Display Name: {display_name}", font=self.canvas_font)
-        y_offset += 35
-
         # Silhouette Name
         self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Silhouette: {silhouette}", font=self.canvas_font)
         y_offset += 35
@@ -447,6 +445,27 @@ class AuditApp:
         # Web Style Name
         self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Web Style: {web_style}", font=self.canvas_font)
         y_offset += 35
+
+        # Web Display Name (wrap to two lines if > 25 chars)
+        def _wrap_two_lines(text, max_chars=25):
+            text = str(text) if text is not None else ""
+            if len(text) <= max_chars:
+                return text
+            cut = text.rfind(" ", 0, max_chars + 1)
+            if cut == -1 or cut < max_chars // 2:
+                cut = max_chars
+            return text[:cut].rstrip() + "\n" + text[cut:].lstrip()
+
+        display_name_wrapped = _wrap_two_lines(display_name, 45)
+        self.canvas.create_text(
+            x_offset,
+            y_offset,
+            anchor='nw',
+            text=f"Web Display Name: {display_name_wrapped}",
+            font=self.canvas_font
+        )
+        # Add a bit more space if wrapped to two lines
+        y_offset += 60 if "\n" in display_name_wrapped else 30
 
         # Add Style Number label on canvas
         self.canvas.create_text(x_offset, y_offset, anchor='nw', text="Style Number:", font=self.canvas_font)
