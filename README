@@ -26,6 +26,15 @@ Select choose file and select the csv report you were emailed that contains the 
 Output: 
 Results are saved to to_audit.csv in the same folder. Import this at: https://3847979.app.netsuite.com/app/setup/assistants/nsimport/importassistant.nl?recid=1856&new=T
 
+Updates:
+Added product count
+Added display name, web style, silhouette
+Added Save and Quit functionality with save on exit and load on entry
+Added wrong image option with output for wrong images
+Added missing/wrong color display
+Updated to handle missing images
+Overall UI improvements to fit on smaller screens
+
 Repository
 github.com/elitetaco111/audit-tool
 
