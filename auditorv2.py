@@ -990,7 +990,13 @@ class AuditApp:
                 wrong_details["Logo ID"] = new_logo
         if "Parent Color Primary" in wrong_fields:
             color_options = load_csv_column("ColorList.csv", "Parent Color Primary", filter_col="Team League Data", filter_val=row['Team League Data'])
-            new_color = select_from_list("Select Parent Color Primary", f"Select the correct Parent Color Primary for team '{row['Team League Data']}':", color_options)
+            new_color = select_from_list(
+                "Select Parent Color Primary",
+                f"Select the correct Parent Color Primary for team '{row['Team League Data']}':",
+                color_options,
+                show_images=True,
+                image_folder=COLORS_FOLDER
+            )
             if new_color:
                 wrong_details["Parent Color Primary"] = new_color
         if "Class Mapping" in wrong_fields:
