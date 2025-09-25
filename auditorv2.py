@@ -917,13 +917,57 @@ class AuditApp:
             values = []
             if not os.path.exists(path):
                 return values
-            with open(path, newline='', encoding='utf-8') as csvfile:
-                reader = csv.DictReader(csvfile)
-                for r in reader:
-                    if filter_col and filter_val and r.get(filter_col) != filter_val:
-                        continue
-                    values.append(r[colname])
-            return sorted(set(values))
+
+            # Allow column aliases (Logo ID -> Name in LogoList.csv, case-insensitive)
+            alias = {
+                "logo id": "name",
+            }
+            try:
+                with open(path, newline='', encoding='utf-8') as csvfile:
+                    reader = csv.DictReader(csvfile)
+                    # Build a case-insensitive header map
+                    header_map = {h.lower().strip(): h for h in (reader.fieldnames or [])}
+
+                    # Resolve target and filter columns against aliases and actual headers
+                    want_col_key = alias.get(colname.lower().strip(), colname.lower().strip())
+                    target_col = header_map.get(want_col_key)
+                    if target_col is None:
+                        # Nothing we can do; return empty to avoid KeyError
+                        return values
+
+                    filter_col_key = None
+                    filter_col_name = None
+                    if filter_col:
+                        filter_col_key = alias.get(filter_col.lower().strip(), filter_col.lower().strip())
+                        filter_col_name = header_map.get(filter_col_key)
+
+                    fval = str(filter_val).strip() if filter_val is not None and str(filter_val).strip() != "" else None
+
+                    for r in reader:
+                        if filter_col_name and fval:
+                            rv = r.get(filter_col_name, "")
+                            if str(rv).strip() != fval:
+                                continue
+                        v = r.get(target_col, "")
+                        if v is not None and str(v).strip() != "":
+                            values.append(str(v).strip())
+
+                # If filter yielded no options but we had a filter, fall back to all values in target_col
+                if not values and filter_col_name:
+                    with open(path, newline='', encoding='utf-8') as csvfile:
+                        reader = csv.DictReader(csvfile)
+                        # Rebuild header map in case DictReader changed
+                        header_map = {h.lower().strip(): h for h in (reader.fieldnames or [])}
+                        target_col = header_map.get(want_col_key)
+                        for r in reader:
+                            v = r.get(target_col, "")
+                            if v is not None and str(v).strip() != "":
+                                values.append(str(v).strip())
+
+                return sorted(set(values))
+            except Exception:
+                # Be defensive: never raise from here
+                return sorted(set(values))
 
         # Always handle Team League Data first if selected
         if "Team League Data" in wrong_fields:
