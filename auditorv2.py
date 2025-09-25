@@ -24,11 +24,7 @@ github.com/elitetaco111/audit-tool
 
 To Package: pyinstaller --onefile --noconsole --hidden-import=tkinter --add-data "ColorList.csv;." --add-data "LogoList.csv;." --add-data "TeamList.csv;." --add-data "ClassMappingList.csv;." --add-data "choose.png;." --add-data "back.png;." --add-data "background.png;." --add-data "Logos;Logos" --add-data "Colors;Colors" auditorv2.py
 
-CHANGES:
-Added product count
-Added display name, web style, silhouette
-Added Save and Quit functionality
-Added wrong image option
+Note: Setting wrong image makes it disappear from the audit flow and changes will not be applied, can change if needed
 """
 TEMP_FOLDER = "TEMP"
 LOGOS_FOLDER = "Logos"
