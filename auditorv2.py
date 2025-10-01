@@ -91,6 +91,10 @@ class AuditApp:
         self.expected_names = []
         # Map each Name (parent or child) to its Internal ID from the original CSV
         self.name_to_internal_id = {}
+        # Background image state
+        self.bg_original = None
+        self.bg_image_id = None
+        self.tk_bg_img = None
 
     # Helper: place a popup on the same screen as the root
     def _place_popup(self, popup, width, height, align="center", margin=40):
@@ -175,6 +179,8 @@ class AuditApp:
         self.canvas = tk.Canvas(self.frame, width=1920, height=1080, bg="white")
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas_font = ("Roboto", 18)
+        # Resize background with the canvas
+        self.canvas.bind("<Configure>", self._on_canvas_resize)
 
         # Add a Save & Quit button pinned to the top-right
         self.btn_save_quit = ttk.Button(self.frame, text="Save and Quit", command=self.save_and_quit)
@@ -351,13 +357,9 @@ class AuditApp:
         self.missing_rows = self.missing_rows or []
         self.data_missing = None
         self.btn_load.pack_forget()
-        bg_path = resource_path("background.png")
-        if os.path.exists(bg_path):
-            bg_img = Image.open(bg_path)
-            bg_img = bg_img.resize((1920, 1080))
-            self.tk_bg_img = ImageTk.PhotoImage(bg_img)
-            self.bg_image_id = self.canvas.create_image(0, 0, anchor='nw', image=self.tk_bg_img)
-            self.canvas.tag_lower(self.bg_image_id)
+        # Load and draw background stretched to canvas size
+        self._load_bg_image()
+        self._update_bg_image()
 
         self.show_image()
 
@@ -1346,6 +1348,42 @@ class AuditApp:
     def handle_app_exit(self):
         if not self.completed:
             self.save_session()
+
+    # Background helpers
+    def _load_bg_image(self):
+        if self.bg_original is None:
+            try:
+                bg_path = resource_path("background.png")
+                if os.path.exists(bg_path):
+                    self.bg_original = Image.open(bg_path)
+            except Exception:
+                self.bg_original = None
+
+    def _update_bg_image(self, width=None, height=None):
+        if not self.bg_original or not hasattr(self, "canvas"):
+            return
+        # Determine target size (canvas size)
+        w = int(width) if width else int(self.canvas.winfo_width())
+        h = int(height) if height else int(self.canvas.winfo_height())
+        if w <= 1 or h <= 1:
+            # Canvas not yet laid out; try again shortly
+            self.root.after(50, self._update_bg_image)
+            return
+        try:
+            # Stretch to fill canvas
+            resized = self.bg_original.resize((w, h), Image.LANCZOS)
+            self.tk_bg_img = ImageTk.PhotoImage(resized)
+            if self.bg_image_id:
+                self.canvas.itemconfig(self.bg_image_id, image=self.tk_bg_img)
+            else:
+                self.bg_image_id = self.canvas.create_image(0, 0, anchor='nw', image=self.tk_bg_img)
+            self.canvas.tag_lower(self.bg_image_id)
+        except Exception:
+            pass
+
+    def _on_canvas_resize(self, event):
+        # Keep background stretched to new size
+        self._update_bg_image(event.width, event.height)
 
 if __name__ == "__main__":
     try:
