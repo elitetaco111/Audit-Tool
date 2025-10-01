@@ -26,6 +26,10 @@ To Package: pyinstaller --onefile --noconsole --hidden-import=tkinter --add-data
 
 Note: Setting wrong image makes it disappear from the audit flow and changes will not be applied, can change if needed
 """
+#TODO:
+#add marketing event
+#take off from website fields for bad image
+
 TEMP_FOLDER = "TEMP"
 LOGOS_FOLDER = "Logos"
 COLORS_FOLDER = "Colors"
@@ -85,6 +89,8 @@ class AuditApp:
         # NEW: track download lifecycle and expected names
         self.download_done = False
         self.expected_names = []
+        # Map each Name (parent or child) to its Internal ID from the original CSV
+        self.name_to_internal_id = {}
 
     # Helper: place a popup on the same screen as the root
     def _place_popup(self, popup, width, height, align="center", margin=40):
@@ -108,7 +114,6 @@ class AuditApp:
             # Fallback: just center on default screen
             popup.geometry(f"{int(width)}x{int(height)}")
 
-    # NEW: unified missing-field detection (honors '-TBD' as missing for Logo ID)
     def _get_missing_fields(self, row):
         fields = []
         def _val(key):
@@ -125,7 +130,6 @@ class AuditApp:
             fields.append("Team League Data")
         return fields
 
-    # NEW: filter saved missing list on resume
     def _filter_missing_rows_after_resume(self):
         try:
             audited_indices = {getattr(c[1], "name", None) for c in self.choices if c and c[0] in ("accepted", "to_audit", "wrong_image")}
@@ -248,6 +252,8 @@ class AuditApp:
                     self.wrong_image_names = set(m.get("wrong_images", []))
                     # NEW: ensure saved missing list only includes rows still missing and not audited
                     self._filter_missing_rows_after_resume()
+                    # Build Name -> Internal ID map from original CSV for reliable output
+                    self.name_to_internal_id = self._build_name_to_id(self.original_csv_path)
                     resumed = True
                 except Exception as e:
                     messagebox.showwarning("Resume failed", f"Could not resume session. Starting a new one.\n\n{e}", parent=self.root)
@@ -261,7 +267,6 @@ class AuditApp:
         self.progress_bar.update_idletasks()
 
         if not resumed:
-            # New session: read CSV and split parent/child records
             self.data = pd.read_csv(file_path, dtype=str)
 
             # Preprocess: Separate parent and child records
@@ -283,12 +288,17 @@ class AuditApp:
             self.data.to_csv(self.session_data_csv_path, index=False)
 
             parent_csv_for_dl = self.session_data_csv_path
+
+            # NEW: Build Name -> Internal ID map (parents and children) from the original CSV
+            self.name_to_internal_id = self._build_name_to_id(self.original_csv_path)
         else:
             total_images = len(self.data)
             # NEW: expected names list for download verification
             self.expected_names = [str(n) if pd.notna(n) else "" for n in self.data.get('Name', [])]
             parent_csv_for_dl = self.session_data_csv_path
-
+            # Ensure Name -> Internal ID map exists on resume
+            if not getattr(self, "name_to_internal_id", None):
+                self.name_to_internal_id = self._build_name_to_id(self.original_csv_path)
         # Start download in a background thread (idempotent; will skip existing images)
         threading.Thread(
             target=self.download_images_thread,
@@ -694,7 +704,6 @@ class AuditApp:
             checks_frame = ttk.Frame(main_frame)
             checks_frame.pack(fill=tk.X, anchor='w')
 
-            # NEW: free-form inputs for Silhouette and Web Style
             silhouette_var = tk.StringVar(value=(row['Silhouette'] if 'Silhouette' in row and pd.notna(row['Silhouette']) else ""))
             web_style_var = tk.StringVar(value=(row['Web Style'] if 'Web Style' in row and pd.notna(row['Web Style']) else ""))
 
@@ -1069,14 +1078,57 @@ class AuditApp:
         to_audit_filename = f"to_audit_{date_suffix}.csv"
         wrong_images_filename = f"wrong_images_{date_suffix}.csv"
 
+        # Helper to collect wrong-image parent+children rows
+        def _collect_wrong_rows():
+            rows = []
+            wrong_set_local = set(self.wrong_image_names)
+            if not wrong_set_local:
+                return rows
+
+            # Candidate keys for fallback internal id read (if needed)
+            id_keys = ('Internal ID', 'Internal ID.1', 'Internal ID 0', 'InternalID0', 'InternalID', 'Internal ID0')
+
+            def _id_from_series(series):
+                if series is None:
+                    return ""
+                for k in id_keys:
+                    if k in series and pd.notna(series[k]) and str(series[k]).strip():
+                        return str(series[k]).strip()
+                return ""
+
+            # Map parent Name -> parent row for fallback
+            name_to_parent = {}
+            if self.data is not None and not self.data.empty and 'Name' in self.data.columns:
+                for _, prow in self.data.iterrows():
+                    name_to_parent[str(prow.get('Name', '') or '')] = prow
+
+            for parent_name in sorted(wrong_set_local):
+                # Parent row id via map, then fallback
+                prow = name_to_parent.get(parent_name)
+                pid = self.name_to_internal_id.get(parent_name, "") or _id_from_series(prow)
+                rows.append({"Internal ID": pid, "Name": parent_name})
+
+                # Children
+                if hasattr(self, 'child_records') and parent_name in getattr(self, 'child_records', {}):
+                    for crow in self.child_records[parent_name]:
+                        child_name = str(crow.get('Name', '') or '').strip()
+                        cid = self.name_to_internal_id.get(child_name, "") or _id_from_series(crow)
+                        rows.append({"Internal ID": cid, "Name": child_name})
+            return rows
+
         if self.data is None or self.data.empty:
-            # Still write a wrong_images file (even if no parent data)
+            # Still write a wrong_images file (with new policy columns)
             try:
-                with open(wrong_images_filename, "w", newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(["Name"])
-                    for n in sorted(set(self.wrong_image_names)):
-                        writer.writerow([n])
+                wrong_rows = _collect_wrong_rows()
+                wrong_df = pd.DataFrame(wrong_rows if wrong_rows else [], columns=["Internal ID", "Name"])
+                # Add required policy columns
+                ts_plus_hour = (datetime.datetime.now() + datetime.timedelta(hours=1)).strftime("%m/%d/%Y %I:%M:%S %p")
+                wrong_df["Did you make a POL"] = ""
+                wrong_df["Do Not Display in Web Store"] = "Yes"
+                wrong_df["Do Not Display Reason"] = "Bad Image"
+                wrong_df["Web Store Deleted Date"] = ts_plus_hour
+                wrong_df["Display in Web Store"] = "No"
+                wrong_df.to_csv(wrong_images_filename, index=False)
             except Exception as e:
                 print(f"Failed to write {wrong_images_filename}: {e}")
             return
@@ -1108,17 +1160,43 @@ class AuditApp:
 
         output_df = pd.DataFrame(output_rows)
         output_df = output_df[[col for col in output_df.columns if col not in exclude_cols]].copy()
+
+        # NEW: Ensure Internal ID is present and populated using the Name -> ID map
+        if 'Name' in output_df.columns:
+            mapped_ids = output_df['Name'].map(lambda x: self.name_to_internal_id.get(str(x), ""))
+            if 'Internal ID' in output_df.columns:
+                mask = output_df['Internal ID'].isna() | (output_df['Internal ID'].astype(str).str.strip() == "")
+                output_df.loc[mask, 'Internal ID'] = mapped_ids[mask]
+            else:
+                output_df['Internal ID'] = mapped_ids
+
         today_str = datetime.datetime.now().strftime("%m/%d/%Y")
         output_df["Flash Sale Date"] = today_str
         output_df.to_csv(to_audit_filename, index=False)
 
-        # Write wrong_images (unique parent Names)
+        # Write wrong_images (parents + children) with required policy columns
         try:
-            with open(wrong_images_filename, "w", newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(["Name"])
-                for n in sorted(wrong_set):
-                    writer.writerow([n])
+            wrong_rows = _collect_wrong_rows()
+            wrong_df = pd.DataFrame(wrong_rows, columns=["Internal ID", "Name"])
+            ts_plus_hour = (datetime.datetime.now() + datetime.timedelta(hours=1)).strftime("%m/%d/%Y %I:%M:%S %p")
+            wrong_df["Did you make a POL"] = ""
+            wrong_df["Do Not Display in Web Store"] = "Yes"
+            wrong_df["Do Not Display Reason"] = "Bad Image"
+            wrong_df["Web Store Deleted Date"] = ts_plus_hour
+            wrong_df["Display in Web Store"] = "No"
+
+            # NEW: dedupe and enforce column order
+            wrong_df = wrong_df.drop_duplicates(subset=["Internal ID", "Name"], keep="first")
+            wrong_df = wrong_df.reindex(columns=[
+                "Internal ID", "Name",
+                "Did you make a POL",
+                "Do Not Display in Web Store",
+                "Do Not Display Reason",
+                "Web Store Deleted Date",
+                "Display in Web Store"
+            ])
+
+            wrong_df.to_csv(wrong_images_filename, index=False)
         except Exception as e:
             print(f"Failed to write {wrong_images_filename}: {e}")
 
@@ -1137,7 +1215,6 @@ class AuditApp:
         finally:
             self.root.destroy()
 
-    # NEW: helper to count audited parent products (unique parent indices)
     def _audited_count(self):
         try:
             return len({getattr(c[1], "name", None) for c in self.choices if len(c) >= 3 and not c[2]})
@@ -1175,6 +1252,27 @@ class AuditApp:
                 parent_name = name.split(" :")[0]
                 child_records.setdefault(parent_name, []).append(row.copy())
         return child_records
+
+    # NEW: Build a reliable Name -> Internal ID map from any CSV (includes parents and children)
+    def _build_name_to_id(self, csv_path):
+        mapping = {}
+        try:
+            df_full = pd.read_csv(csv_path, dtype=str)
+            id_keys = ['Internal ID', 'Internal ID.1', 'Internal ID 0', 'InternalID0', 'InternalID', 'Internal ID0']
+            for _, r in df_full.iterrows():
+                name = str(r.get('Name', '') or '').strip()
+                if not name:
+                    continue
+                iid = ""
+                for k in id_keys:
+                    if k in r and pd.notna(r[k]) and str(r[k]).strip():
+                        iid = str(r[k]).strip()
+                        break
+                if name and iid:
+                    mapping[name] = iid
+        except Exception:
+            pass
+        return mapping
 
     def save_session(self):
         if self.data is None:
