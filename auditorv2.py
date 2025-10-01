@@ -28,7 +28,6 @@ Note: Setting wrong image makes it disappear from the audit flow and changes wil
 """
 #TODO:
 #add marketing event
-#take off from website fields for bad image
 
 TEMP_FOLDER = "TEMP"
 LOGOS_FOLDER = "Logos"
