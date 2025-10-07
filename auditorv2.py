@@ -1122,13 +1122,20 @@ class AuditApp:
             try:
                 wrong_rows = _collect_wrong_rows()
                 wrong_df = pd.DataFrame(wrong_rows if wrong_rows else [], columns=["Internal ID", "Name"])
-                # Add required policy columns
-                ts_plus_hour = (datetime.datetime.now() + datetime.timedelta(hours=1)).strftime("%m/%d/%Y %I:%M:%S %p")
                 wrong_df["Did you make a POL"] = ""
                 wrong_df["Do Not Display in Web Store"] = "Yes"
                 wrong_df["Do Not Display Reason"] = "Bad Image"
-                wrong_df["Web Store Deleted Date"] = ts_plus_hour
                 wrong_df["Display in Web Store"] = "No"
+
+                wrong_df = wrong_df.drop_duplicates(subset=["Internal ID", "Name"], keep="first")
+                wrong_df = wrong_df.reindex(columns=[
+                    "Internal ID", "Name",
+                    "Did you make a POL",
+                    "Do Not Display in Web Store",
+                    "Do Not Display Reason",
+                    "Display in Web Store"
+                ])
+
                 wrong_df.to_csv(wrong_images_filename, index=False)
             except Exception as e:
                 print(f"Failed to write {wrong_images_filename}: {e}")
@@ -1179,21 +1186,17 @@ class AuditApp:
         try:
             wrong_rows = _collect_wrong_rows()
             wrong_df = pd.DataFrame(wrong_rows, columns=["Internal ID", "Name"])
-            ts_plus_hour = (datetime.datetime.now() + datetime.timedelta(hours=1)).strftime("%m/%d/%Y %I:%M:%S %p")
             wrong_df["Did you make a POL"] = ""
             wrong_df["Do Not Display in Web Store"] = "Yes"
             wrong_df["Do Not Display Reason"] = "Bad Image"
-            wrong_df["Web Store Deleted Date"] = ts_plus_hour
             wrong_df["Display in Web Store"] = "No"
 
-            # NEW: dedupe and enforce column order
             wrong_df = wrong_df.drop_duplicates(subset=["Internal ID", "Name"], keep="first")
             wrong_df = wrong_df.reindex(columns=[
                 "Internal ID", "Name",
                 "Did you make a POL",
                 "Do Not Display in Web Store",
                 "Do Not Display Reason",
-                "Web Store Deleted Date",
                 "Display in Web Store"
             ])
 
