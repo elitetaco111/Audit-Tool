@@ -27,7 +27,6 @@ To Package: pyinstaller --onefile --noconsole --hidden-import=tkinter --add-data
 Note: Setting wrong image makes it disappear from the audit flow and changes will not be applied, can change if needed
 """
 #TODO:
-#add marketing event
 
 TEMP_FOLDER = "TEMP"
 LOGOS_FOLDER = "Logos"
@@ -417,6 +416,7 @@ class AuditApp:
         color_id = row['Parent Color Primary'] if pd.notna(row['Parent Color Primary']) else ""
         team_league = row['Team League Data'] if pd.notna(row['Team League Data']) else ""
         display_name = row['Web Display Name'] if pd.notna(row['Web Display Name']) else ""
+        marketing_event = row['Marketing Event'] if 'Marketing Event' in row and pd.notna(row['Marketing Event']) else ""
         silhouette = row['Silhouette'] if pd.notna(row['Silhouette']) else ""
         web_style = row['Web Style'] if pd.notna(row['Web Style']) else ""
         img_path = os.path.join(self.temp_folder, f"{row['Name']}.jpg")  # <-- was TEMP_FOLDER
@@ -505,8 +505,11 @@ class AuditApp:
             text=f"Web Display Name: {display_name_wrapped}",
             font=self.canvas_font
         )
-        # Add a bit more space if wrapped to two lines
         y_offset += 60 if "\n" in display_name_wrapped else 30
+
+        # Marketing Event (NEW, placed after Web Display Name)
+        self.canvas.create_text(x_offset, y_offset, anchor='nw', text=f"Marketing Event: {marketing_event}", font=self.canvas_font)
+        y_offset += 35
 
         # Add Style Number label on canvas
         self.canvas.create_text(x_offset, y_offset, anchor='nw', text="Style Number:", font=self.canvas_font)
@@ -642,8 +645,9 @@ class AuditApp:
             "Class Mapping",
             "Parent Color Primary",
             "Team League Data",
-            "Silhouette",       # NEW
-            "Web Style",        # NEW
+            "Silhouette",
+            "Web Style",
+            "Marketing Event",   # <-- Add here
             "Wrong Image"
         ]
         # include a 'back' flag
@@ -707,6 +711,7 @@ class AuditApp:
 
             silhouette_var = tk.StringVar(value=(row['Silhouette'] if 'Silhouette' in row and pd.notna(row['Silhouette']) else ""))
             web_style_var = tk.StringVar(value=(row['Web Style'] if 'Web Style' in row and pd.notna(row['Web Style']) else ""))
+            marketing_event_var = tk.StringVar(value=(row['Marketing Event'] if 'Marketing Event' in row and pd.notna(row['Marketing Event']) else ""))
 
             silhouette_frame = ttk.Frame(main_frame)
             ttk.Label(silhouette_frame, text="Silhouette should be:").pack(side=tk.LEFT, padx=(0, 8))
@@ -715,6 +720,10 @@ class AuditApp:
             web_style_frame = ttk.Frame(main_frame)
             ttk.Label(web_style_frame, text="Web Style should be:").pack(side=tk.LEFT, padx=(0, 8))
             ttk.Entry(web_style_frame, textvariable=web_style_var, width=36).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+            marketing_event_frame = ttk.Frame(main_frame)
+            ttk.Label(marketing_event_frame, text="Marketing Event should be:").pack(side=tk.LEFT, padx=(0, 8))
+            ttk.Entry(marketing_event_frame, textvariable=marketing_event_var, width=36).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
             # Toggle helpers
             def toggle_silhouette():
@@ -729,18 +738,27 @@ class AuditApp:
                 else:
                     web_style_frame.pack_forget()
 
-            # Build checkboxes (attach toggle command for the two new fields)
+            def toggle_marketing_event():
+                if vars["Marketing Event"].get():
+                    marketing_event_frame.pack(fill=tk.X, pady=(6, 0), anchor='w')
+                else:
+                    marketing_event_frame.pack_forget()
+
+            # Build checkboxes (attach toggle command for the new field)
             for field in fields:
                 if field == "Silhouette":
                     ttk.Checkbutton(checks_frame, text=field, variable=vars[field], command=toggle_silhouette).pack(anchor='w', pady=2)
                 elif field == "Web Style":
                     ttk.Checkbutton(checks_frame, text=field, variable=vars[field], command=toggle_web_style).pack(anchor='w', pady=2)
+                elif field == "Marketing Event":
+                    ttk.Checkbutton(checks_frame, text=field, variable=vars[field], command=toggle_marketing_event).pack(anchor='w', pady=2)
                 else:
                     ttk.Checkbutton(checks_frame, text=field, variable=vars[field]).pack(anchor='w', pady=2)
 
             # If preselected includes these, show their inputs now
             toggle_silhouette()
             toggle_web_style()
+            toggle_marketing_event()
 
             def submit():
                 selected = [field for field in fields if vars[field].get()]
@@ -758,14 +776,18 @@ class AuditApp:
                 if "Web Style" in selected and not web_style_var.get().strip():
                     messagebox.showwarning("Input required", "Please enter a value for Web Style.", parent=popup)
                     return
+                if "Marketing Event" in selected and not marketing_event_var.get().strip():
+                    messagebox.showwarning("Input required", "Please enter a value for Marketing Event.", parent=popup)
+                    return
 
                 result["value"] = selected
-                # Pre-populate details for free-form fields
                 details = {}
                 if "Silhouette" in selected:
                     details["Silhouette"] = silhouette_var.get().strip()
                 if "Web Style" in selected:
                     details["Web Style"] = web_style_var.get().strip()
+                if "Marketing Event" in selected:
+                    details["Marketing Event"] = marketing_event_var.get().strip()
                 result["details"] = details
                 popup.destroy()
 
